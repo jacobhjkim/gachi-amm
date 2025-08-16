@@ -1,0 +1,10 @@
+{
+  "idl": "./tests/fixtures/damm_v2_idl.json",
+  "before": [],
+  "scripts": {
+    "js": {
+      "from": "@codama/renderers-js",
+      "args": ["clients/damm/src/generated"]
+    }
+  }
+}

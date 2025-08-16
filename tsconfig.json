@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "types": ["node", "bun-types"],
+    "lib": ["es2017", "dom", "esnext"],
+    "module": "commonjs",
+    "target": "ESNext",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true,
+    "strict": false,
+    "moduleResolution": "bundler",
+    "paths": {
+      "~/clients": ["./clients/js/src/generated"]
+    }
+  },
+  "include": ["tests/**/*", "target/types/**/*", "clients/js/**/*"],
+  "exclude": ["node_modules", "target/deploy", "target/idl"]
+}

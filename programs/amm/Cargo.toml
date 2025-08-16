@@ -1,0 +1,32 @@
+[package]
+name = "amm"
+version = "0.1.0"
+description = "AMM"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "amm"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+local = []
+devnet = []
+
+[dependencies]
+anchor-lang = { workspace = true, features = ["event-cpi", "init-if-needed"] }
+anchor-spl = { workspace = true, features = [] }
+bytemuck = { workspace = true, features = ["min_const_generics"] }
+mpl-token-metadata = "5.1.0"
+static_assertions = "1.1.0"
+ruint = "1.16.0"
+num_enum = "0.7.4"
+num-traits = "0.2.19"
+const-crypto = "0.3.0"
+damm-v2 = { path = "../../libs/damm-v2" }
+locker = { path = "../../libs/locker" }

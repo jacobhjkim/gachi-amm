@@ -1,0 +1,320 @@
+use anchor_lang::prelude::*;
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token_interface::{
+        Mint as MintInterface, TokenAccount as TokenAccountInterface, TokenInterface,
+    },
+};
+use locker::types::CreateVestingEscrowParameters;
+
+use crate::{
+    assert_eq_admin,
+    constants::{fee::MAX_FEE_BASIS_POINTS, MAX_CURVE_POINT, MAX_SQRT_PRICE, MIN_SQRT_PRICE},
+    errors::AmmError,
+    params::liquidity_distribution::{
+        get_base_token_for_swap, get_migration_base_token, get_migration_threshold_price,
+        LiquidityDistributionParameters,
+    },
+    safe_math::SafeMath,
+    states::{Config, LockedVestingConfig, TokenType},
+    utils::{get_token_program_flags, is_supported_quote_mint},
+};
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq)]
+pub struct LockedVestingParams {
+    pub amount_per_period: u64,
+    pub cliff_duration_from_migration_time: u64,
+    pub frequency: u64,
+    pub number_of_period: u64,
+    pub cliff_unlock_amount: u64,
+}
+
+impl LockedVestingParams {
+    pub fn to_locked_vesting_config(&self) -> LockedVestingConfig {
+        LockedVestingConfig {
+            amount_per_period: self.amount_per_period,
+            cliff_duration_from_migration_time: self.cliff_duration_from_migration_time,
+            frequency: self.frequency,
+            number_of_period: self.number_of_period,
+            cliff_unlock_amount: self.cliff_unlock_amount,
+            ..Default::default()
+        }
+    }
+
+    pub fn to_create_vesting_escrow_params(
+        &self,
+        finish_curve_timestamp: u64,
+    ) -> Result<CreateVestingEscrowParameters> {
+        let cliff_time =
+            finish_curve_timestamp.safe_add(self.cliff_duration_from_migration_time)?;
+        Ok(CreateVestingEscrowParameters {
+            vesting_start_time: finish_curve_timestamp,
+            cliff_time,
+            frequency: self.frequency,
+            cliff_unlock_amount: self.cliff_unlock_amount,
+            amount_per_period: self.amount_per_period,
+            number_of_period: self.number_of_period,
+            update_recipient_mode: 2, // only recipient
+            cancel_mode: 1,           // only creator
+        })
+    }
+
+    pub fn get_total_amount(&self) -> Result<u64> {
+        let total_amount = self
+            .cliff_unlock_amount
+            .safe_add(self.amount_per_period.safe_mul(self.number_of_period)?)?;
+        Ok(total_amount)
+    }
+
+    pub fn has_vesting(&self) -> bool {
+        *self != LockedVestingParams::default()
+    }
+    pub fn validate(&self) -> Result<()> {
+        if self.has_vesting() {
+            let total_amount = self.get_total_amount()?;
+            require!(
+                self.frequency != 0 && total_amount != 0,
+                AmmError::InvalidVestingParameters
+            );
+        }
+        Ok(())
+    }
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Debug)]
+pub struct ConfigParameters {
+    /* Token configurations */
+    /// token type (0 | 1), 0: SPL Token, 1: Token2022
+    pub token_type: u8,
+    /// token decimal, (6 | 9)
+    pub token_decimal: u8,
+
+    /* Fee configurations */
+    /// Trading fee in bps
+    pub fee_basis_points: u16,
+    /// Level 1 referral fee in bps
+    pub l1_referral_fee_basis_points: u16,
+    /// Level 2 referral fee in bps
+    pub l2_referral_fee_basis_points: u16,
+    /// Level 3 referral fee in bps
+    pub l3_referral_fee_basis_points: u16,
+    /// Referee discount in bps
+    pub referee_discount_basis_points: u16,
+    /// creator fee in bps
+    pub creator_fee_basis_points: u16,
+    /// migration fee in bps (quote token fee)
+    pub migration_fee_basis_points: u16,
+
+    /* Vesting configurations */
+    pub locked_vesting: LockedVestingParams,
+
+    /* Price configurations */
+    pub initial_sqrt_price: u128,
+    pub migration_quote_threshold: u64,
+    pub curve: Vec<LiquidityDistributionParameters>,
+}
+
+impl ConfigParameters {
+    pub fn validate<'info>(
+        &self,
+        quote_mint: &InterfaceAccount<'info, MintInterface>,
+    ) -> Result<()> {
+        // validate quote mint
+        require!(
+            is_supported_quote_mint(quote_mint)?,
+            AmmError::InvalidQuoteMint
+        );
+
+        // validate token type
+        TokenType::try_from(self.token_type).map_err(|_| AmmError::InvalidTokenType)?;
+
+        // validate token decimals
+        require!(
+            self.token_decimal >= 6 && self.token_decimal <= 9,
+            AmmError::InvalidTokenDecimals
+        );
+
+        let fee_basis_points_sum = self
+            .l1_referral_fee_basis_points
+            .safe_add(self.l2_referral_fee_basis_points)?
+            .safe_add(self.l3_referral_fee_basis_points)?
+            .safe_add(self.creator_fee_basis_points)?;
+        require!(
+            self.fee_basis_points > fee_basis_points_sum,
+            AmmError::InvalidFeeBasisPoints
+        );
+
+        // validate referral fee hierarchy
+        require!(
+            self.l1_referral_fee_basis_points > self.l2_referral_fee_basis_points,
+            AmmError::InvalidAmmConfig
+        );
+        require!(
+            self.l2_referral_fee_basis_points > self.l3_referral_fee_basis_points,
+            AmmError::InvalidAmmConfig
+        );
+
+        // validate creator trading fee percentage
+        require!(
+            self.creator_fee_basis_points <= 1000,
+            AmmError::InvalidCreatorTradingFeePercentage
+        );
+
+        // fee basis points configurations
+        require!(
+            self.fee_basis_points <= MAX_FEE_BASIS_POINTS,
+            AmmError::InvalidAmmConfig
+        );
+
+        require!(
+            self.migration_quote_threshold > 0,
+            AmmError::InvalidQuoteThreshold
+        );
+
+        // validate vesting params
+        self.locked_vesting.validate()?;
+
+        // validate price and liquidity
+        require!(
+            self.initial_sqrt_price >= MIN_SQRT_PRICE && self.initial_sqrt_price < MAX_SQRT_PRICE,
+            AmmError::InvalidCurve
+        );
+        let curve_length = self.curve.len();
+        require!(
+            curve_length > 0 && curve_length <= MAX_CURVE_POINT,
+            AmmError::InvalidCurve
+        );
+        require!(
+            self.curve[0].sqrt_price > self.initial_sqrt_price
+                && self.curve[0].liquidity > 0
+                && self.curve[0].sqrt_price <= MAX_SQRT_PRICE,
+            AmmError::InvalidCurve
+        );
+
+        for i in 1..curve_length {
+            require!(
+                self.curve[i].sqrt_price > self.curve[i - 1].sqrt_price
+                    && self.curve[i].liquidity > 0,
+                AmmError::InvalidCurve
+            );
+        }
+
+        // the last price in curve must be smaller than or equal max price
+        require!(
+            self.curve[curve_length - 1].sqrt_price <= MAX_SQRT_PRICE,
+            AmmError::InvalidCurve
+        );
+
+        Ok(())
+    }
+}
+
+#[event_cpi]
+#[derive(Accounts)]
+pub struct CreateConfigCtx<'info> {
+    /// Initialize config state account to store protocol owner address and fee rates.
+    #[account(
+        init,
+        signer,
+        payer = payer,
+        space = 8 + Config::INIT_SPACE,
+    )]
+    pub config: AccountLoader<'info, Config>,
+
+    /// CHECK: fee_claimer
+    /// fee claimer, doesn't have to be a signer
+    pub fee_claimer: UncheckedAccount<'info>,
+
+    /// fee claimer token account
+    #[account(
+        init_if_needed,
+        payer = payer,
+        associated_token::mint = quote_mint,
+        associated_token::authority = fee_claimer,
+        associated_token::token_program = token_program,
+    )]
+    pub fee_claimer_token_account: InterfaceAccount<'info, TokenAccountInterface>,
+
+    /// quote mint
+    pub quote_mint: Box<InterfaceAccount<'info, MintInterface>>,
+
+    /// only admin can create config
+    #[account(
+        mut,
+        constraint = assert_eq_admin(payer.key()) @ AmmError::Unauthorized,
+    )]
+    pub payer: Signer<'info>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+pub fn handle_create_config(
+    ctx: Context<CreateConfigCtx>,
+    config_params: ConfigParameters,
+) -> Result<()> {
+    config_params.validate(&ctx.accounts.quote_mint)?;
+
+    let migration_sqrt_price = get_migration_threshold_price(
+        config_params.migration_quote_threshold,
+        config_params.initial_sqrt_price,
+        &config_params.curve,
+    )?;
+    // migration price must be smaller than max sqrt price
+    require!(
+        migration_sqrt_price < MAX_SQRT_PRICE,
+        AmmError::InvalidCurve
+    );
+
+    let swap_base_amount_256 = get_base_token_for_swap(
+        config_params.initial_sqrt_price,
+        migration_sqrt_price,
+        &config_params.curve,
+    )?;
+    let swap_base_amount: u64 = swap_base_amount_256
+        .try_into()
+        .map_err(|_| AmmError::TypeCastFailed)?;
+
+    let migration_base_threshold = get_migration_base_token(
+        config_params.migration_quote_threshold,
+        config_params.migration_fee_basis_points,
+        migration_sqrt_price,
+    )?;
+
+    require!(
+        // this is fine to add redundant check
+        migration_base_threshold > 0 && swap_base_amount > 0,
+        AmmError::InvalidCurve
+    );
+
+    let mut config = ctx.accounts.config.load_init()?;
+    config.init(
+        /* Token configurations */
+        config_params.token_type,
+        get_token_program_flags(&ctx.accounts.quote_mint).into(),
+        config_params.token_decimal,
+        &ctx.accounts.quote_mint.key(),
+        /* Fee configurations */
+        config_params.fee_basis_points,
+        config_params.l1_referral_fee_basis_points,
+        config_params.l2_referral_fee_basis_points,
+        config_params.l3_referral_fee_basis_points,
+        config_params.referee_discount_basis_points,
+        config_params.creator_fee_basis_points,
+        config_params.migration_fee_basis_points,
+        &ctx.accounts.fee_claimer.key(),
+        /* Price configurations */
+        config_params.initial_sqrt_price,
+        migration_sqrt_price,
+        config_params.migration_quote_threshold,
+        migration_base_threshold,
+        swap_base_amount,
+        /* Vesting configurations */
+        &config_params.locked_vesting,
+        /* Liquidity distribution curve */
+        &config_params.curve,
+    );
+    emit_cpi!(config.event(ctx.accounts.config.key()));
+    Ok(())
+}
