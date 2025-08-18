@@ -1,7 +1,7 @@
 import Decimal from 'decimal.js'
 import type { CreateConfigInstructionDataArgs } from '~/clients'
 import { MIGRATION_FEE_BASIS_POINTS, TOKEN_DECIMALS } from './constants.ts'
-import {LAMPORTS_PER_SOL} from "gill";
+import { LAMPORTS_PER_SOL } from 'gill'
 
 export const RESOLUTION = 64
 
@@ -223,9 +223,7 @@ export const getFirstCurve = ({
   // From (1) and (2) => Quote_amount / Swap_amount = (Pmax * Pmin)               (4)
   // From (3) and (4) => Swap_amount * (1-migrationFeePercent/100) / Migration_amount = Pmax / Pmin
   // => Pmin = Pmax * Migration_amount / (Swap_amount * (1-migrationFeePercent/100))
-  const denominator = swapAmountDecimal
-    .mul(new Decimal(100).sub(migrationFeePercentDecimal))
-    .div(new Decimal(100))
+  const denominator = swapAmountDecimal.mul(new Decimal(100).sub(migrationFeePercentDecimal)).div(new Decimal(100))
 
   const initialSqrtPriceDecimal = migrationSqrPriceDecimal.mul(migrationBaseAmountDecimal).div(denominator)
 
@@ -305,7 +303,6 @@ export function buildCurveWithMarketCap(config: {
 
   // Migration base amount in tokens (not lamports)
   const migrationBaseAmountTokens = migrationBaseAmountLamports.div(new Decimal(10).pow(tokenDecimal))
-
 
   const migrationQuoteThreshold = BigInt(
     getMigrationQuoteThresholdFromMigrationQuoteAmount(migrationQuoteAmount, MIGRATION_FEE_BASIS_POINTS)

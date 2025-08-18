@@ -1,5 +1,8 @@
+use crate::constants::fee::FEE_DENOMINATOR;
+use crate::safe_math::safe_mul_div_cast_u64;
+use crate::u128x128_math::Rounding;
 use crate::{
-    params::{liquidity_distribution::get_sqrt_price_from_amounts, swap::TradeDirection},
+    params::swap::TradeDirection,
     safe_math::SafeMath,
     states::{CashbackTier, Config},
     AmmError,
@@ -87,8 +90,6 @@ pub struct BondingCurve {
     pub quote_reserve: u64,
     /// virtual quote reserve, used for price calculation
     pub virtual_quote_reserve: u64,
-    /// current sqrt_price
-    pub sqrt_price: u128,
     /// curve type, spl token or token2022
     pub curve_type: u8,
     /// fee type, (0: project/creator, 1: meme/community, 2: blocked)
@@ -117,7 +118,6 @@ impl BondingCurve {
         base_mint: Pubkey,
         base_vault: Pubkey,
         quote_vault: Pubkey,
-        sqrt_price: u128,
         curve_type: u8,
         fee_type: u8,
         base_reserve: u64,
@@ -129,7 +129,6 @@ impl BondingCurve {
         self.base_mint = base_mint;
         self.base_vault = base_vault;
         self.quote_vault = quote_vault;
-        self.sqrt_price = sqrt_price;
         self.curve_type = curve_type;
         self.fee_type = fee_type;
         self.fee_type_reviewed = 0; // default to not reviewed
@@ -155,7 +154,6 @@ impl BondingCurve {
         let mut l3_referral_fee = 0u64;
         let mut creator_fee = 0u64;
         let mut cashback_fee = 0u64;
-        let mut next_sqrt_price = 0u128;
         let fee_type = FeeType::try_from(self.fee_type).map_err(|_| AmmError::TypeCastFailed)?;
 
         let mut actual_amount_in = if trade_direction == TradeDirection::QuoteToBase {
@@ -181,7 +179,7 @@ impl BondingCurve {
             amount_in
         };
 
-        let swap_amount = match trade_direction {
+        let output_amount = match trade_direction {
             TradeDirection::QuoteToBase => get_swap_amount_from_quote_to_base(
                 self.virtual_quote_reserve as u128,
                 self.virtual_base_reserve as u128,
@@ -193,13 +191,11 @@ impl BondingCurve {
                 actual_amount_in,
             ),
         }?;
-        next_sqrt_price = swap_amount.next_sqrt_price;
 
         let actual_amount_out = if trade_direction == TradeDirection::QuoteToBase {
             // Check if output_amount exceeds base_reserve first
-            if swap_amount.output_amount >= self.base_reserve
-                || self.base_reserve.safe_sub(swap_amount.output_amount)?
-                    < config.migration_base_threshold
+            if output_amount >= self.base_reserve
+                || self.base_reserve.safe_sub(output_amount)? < config.migration_base_threshold
             {
                 let new_base_output_amount = self
                     .base_reserve
@@ -215,7 +211,7 @@ impl BondingCurve {
                 )?;
 
                 let fee_breakdown = config.get_fee_on_amount(
-                    capped_amount_in.output_amount,
+                    capped_amount_in,
                     has_l1_referral,
                     has_l2_referral,
                     has_l3_referral,
@@ -230,16 +226,15 @@ impl BondingCurve {
                 l3_referral_fee = fee_breakdown.l3_referral_fee;
                 creator_fee = fee_breakdown.creator_fee;
                 cashback_fee = fee_breakdown.cashback_fee;
-                actual_amount_in = capped_amount_in.output_amount;
-                next_sqrt_price = capped_amount_in.next_sqrt_price;
+                actual_amount_in = capped_amount_in;
 
                 new_base_output_amount
             } else {
-                swap_amount.output_amount
+                output_amount
             }
         } else {
             let fee_breakdown = config.get_fee_on_amount(
-                swap_amount.output_amount,
+                output_amount,
                 has_l1_referral,
                 has_l2_referral,
                 has_l3_referral,
@@ -261,7 +256,6 @@ impl BondingCurve {
         Ok(SwapResult {
             actual_input_amount: actual_amount_in,
             output_amount: actual_amount_out,
-            next_sqrt_price,
             trading_fee,
             protocol_fee,
             cashback_fee,
@@ -277,8 +271,6 @@ impl BondingCurve {
         swap_result: &SwapResult,
         trade_direction: TradeDirection,
     ) -> Result<()> {
-        self.sqrt_price = swap_result.next_sqrt_price;
-
         if trade_direction == TradeDirection::BaseToQuote {
             self.base_reserve = self
                 .base_reserve
@@ -381,6 +373,30 @@ impl BondingCurve {
 
         Ok(())
     }
+
+    pub fn get_migration_amount(&self, migration_fee_basis_points: u16) -> Result<MigrationAmount> {
+        let quote_amount: u64 = safe_mul_div_cast_u64(
+            self.quote_reserve,
+            FEE_DENOMINATOR.safe_sub(migration_fee_basis_points as u64)?,
+            FEE_DENOMINATOR,
+            Rounding::Up,
+        )?;
+        let base_amount = safe_mul_div_cast_u64(
+            self.base_reserve,
+            FEE_DENOMINATOR.safe_sub(migration_fee_basis_points as u64)?,
+            FEE_DENOMINATOR,
+            Rounding::Up,
+        )?;
+        Ok(MigrationAmount {
+            quote_amount,
+            base_amount,
+        })
+    }
+}
+
+pub struct MigrationAmount {
+    pub quote_amount: u64,
+    pub base_amount: u64,
 }
 
 /// Encodes all results of swapping
@@ -388,7 +404,6 @@ impl BondingCurve {
 pub struct SwapResult {
     pub actual_input_amount: u64,
     pub output_amount: u64,
-    pub next_sqrt_price: u128,
     pub trading_fee: u64,
     pub protocol_fee: u64,
     pub cashback_fee: u64,
@@ -403,7 +418,7 @@ fn get_swap_amount_from_quote_to_base(
     virtual_quote: u128,
     virtual_base: u128,
     amount_in: u64,
-) -> Result<SwapAmount> {
+) -> Result<u64> {
     // Scale tokens for precision
     // TODO: we are assuming that the quote token has 9 decimals and the base token has 6 decimals.
     // This should be configurable in the future.
@@ -415,17 +430,7 @@ fn get_swap_amount_from_quote_to_base(
         .safe_sub(new_virtual_base_scaled)?
         .safe_div(1000)?;
 
-    let next_sqrt_price = get_sqrt_price_from_amounts(
-        new_virtual_base_scaled,
-        new_virtual_quote,
-        6, // Assuming base token has 6 decimals
-        9, // Assuming quote token has 9 decimals
-    )?;
-
-    Ok(SwapAmount {
-        output_amount: base_out_amount as u64,
-        next_sqrt_price,
-    })
+    Ok(base_out_amount as u64)
 }
 
 /// aka sell
@@ -433,44 +438,21 @@ fn get_swap_amount_from_base_to_quote(
     virtual_quote: u128,
     virtual_base: u128,
     amount_in: u64,
-) -> Result<SwapAmount> {
+) -> Result<u64> {
     // Scale tokens for precision
     // TODO: we are assuming that the quote token has 9 decimals and the base token has 6 decimals.
     // This should be configurable in the future.
     let virtual_base_scaled = virtual_base.safe_mul(1000)?;
     let amount_in_scaled = (amount_in as u128).safe_mul(1000)?;
     let new_virtual_base_scaled = virtual_base_scaled.safe_add(amount_in_scaled)?;
-    msg!(
-        "[BondingCurve] new_virtual_base_scaled: {}",
-        new_virtual_base_scaled
-    );
-    msg!(
-        "[BondingCurve] virtual_base_scaled: {}",
-        virtual_base_scaled
-    );
-    msg!("[BondingCurve] amount_in_scaled: {}", amount_in_scaled);
 
     // Calculate using x*y=k
     let k = virtual_base_scaled.safe_mul(virtual_quote)?;
     let new_quote = k.safe_div(new_virtual_base_scaled)?;
     let quote_out_amount = virtual_quote.safe_sub(new_quote)?;
-    msg!("[BondingCurve] k: {}", k);
-    msg!("[BondingCurve] new_quote: {}", new_quote);
-    msg!("[BondingCurve] quote_out_amount: {}", quote_out_amount);
-
-    let next_sqrt_price = get_sqrt_price_from_amounts(
-        new_virtual_base_scaled,
-        new_quote,
-        6, // Assuming base token has 6 decimals
-        9, // Assuming quote token has 9 decimals
-    )?;
     new_quote.safe_div(new_virtual_base_scaled)?;
-    msg!("[BondingCurve] next_sqrt_price: {}", next_sqrt_price);
 
-    Ok(SwapAmount {
-        output_amount: quote_out_amount as u64,
-        next_sqrt_price,
-    })
+    Ok(quote_out_amount as u64)
 }
 
 pub fn get_price(virtual_quote: u128, virtual_base: u128) -> Result<u128> {
@@ -478,9 +460,4 @@ pub fn get_price(virtual_quote: u128, virtual_base: u128) -> Result<u128> {
     let virtual_base_scaled = virtual_base.safe_mul(1000)?;
     let price = virtual_quote.safe_div(virtual_base_scaled)?;
     Ok(price)
-}
-
-pub struct SwapAmount {
-    output_amount: u64,
-    next_sqrt_price: u128,
 }

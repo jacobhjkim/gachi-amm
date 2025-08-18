@@ -91,8 +91,8 @@ pub struct Config {
     pub initial_virtual_quote_reserve: u64,
     /// initial virtual base reserve to boost the initial liquidity
     pub initial_virtual_base_reserve: u64,
-    // for future use
-    pub _padding_2: [u64; 4],
+    /// for future use
+    pub _padding_3: [u64; 4],
 }
 
 impl Config {
@@ -273,17 +273,6 @@ impl Config {
             l3_referral_fee,
         })
     }
-
-    pub fn get_migration_quote_amount(&self) -> Result<MigrationAmount> {
-        let quote_amount: u64 = safe_mul_div_cast_u64(
-            self.migration_quote_threshold,
-            FEE_DENOMINATOR.safe_sub(self.migration_fee_basis_points as u64)?,
-            FEE_DENOMINATOR,
-            Rounding::Up,
-        )?;
-        let fee = self.migration_quote_threshold.safe_sub(quote_amount)?;
-        Ok(MigrationAmount { quote_amount, fee })
-    }
 }
 
 impl FeeBreakdown {
@@ -295,9 +284,4 @@ impl FeeBreakdown {
             + self.cashback_fee
             + self.protocol_fee
     }
-}
-
-pub struct MigrationAmount {
-    pub quote_amount: u64,
-    pub fee: u64,
 }

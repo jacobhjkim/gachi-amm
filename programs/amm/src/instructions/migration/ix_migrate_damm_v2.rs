@@ -5,9 +5,11 @@ use anchor_spl::{
     token_interface::{TokenAccount, TokenInterface},
 };
 use damm_v2::types::InitializePoolParameters;
+use ruint::aliases::U256;
 use ruint::aliases::U512;
 use std::u64;
 
+use crate::program::Amm;
 use crate::{
     assert_eq_admin, const_pda,
     constants::{MAX_SQRT_PRICE, MIN_SQRT_PRICE},
@@ -17,6 +19,7 @@ use crate::{
     params::liquidity_distribution::get_sqrt_price_from_amounts,
     safe_math::SafeMath,
     states::{BondingCurve, Config, MigrationAmount, MigrationStatus},
+    u128x128_math::{mul_div_u256, Rounding},
 };
 
 #[event_cpi]
@@ -288,22 +291,18 @@ pub fn handle_migrate_damm_v2<'c: 'info, 'info>(
 
     let initial_quote_vault_amount = ctx.accounts.quote_vault.amount;
     let initial_base_vault_amount = ctx.accounts.base_vault.amount;
-    let MigrationAmount { quote_amount, fee } = config.get_migration_quote_amount()?;
+    let MigrationAmount {
+        quote_amount,
+        base_amount,
+    } = curve.get_migration_amount(config.migration_fee_basis_points)?;
 
     // Calculate the sqrt price from the amounts
-    let migration_sqrt_price = get_sqrt_price_from_amounts(
-        initial_base_vault_amount as u128,
-        quote_amount as u128,
-        config.base_decimal,
-        config.quote_decimal,
-    )?;
+    let migration_sqrt_price =
+        get_sqrt_price_from_amounts(base_amount as u128, quote_amount as u128)?;
 
     // calculate initial liquidity
-    let initial_liquidity = get_liquidity_for_adding_liquidity(
-        initial_base_vault_amount,
-        quote_amount,
-        migration_sqrt_price,
-    )?;
+    let initial_liquidity =
+        get_liquidity_for_adding_liquidity(base_amount, quote_amount, migration_sqrt_price)?;
 
     // create pool
     msg!("create pool");
@@ -333,10 +332,6 @@ pub fn handle_migrate_damm_v2<'c: 'info, 'info>(
         initial_base_vault_amount.safe_sub(ctx.accounts.base_vault.amount)?;
     let deposited_quote_amount =
         initial_quote_vault_amount.safe_sub(ctx.accounts.quote_vault.amount)?;
-
-    let updated_excluded_fee_base_reserve =
-        initial_base_vault_amount.safe_sub(deposited_base_amount)?;
-    let updated_quote_threshold = quote_amount.safe_sub(deposited_quote_amount)?;
 
     curve.update_after_migration();
 

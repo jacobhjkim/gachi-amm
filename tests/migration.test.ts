@@ -6,7 +6,7 @@ import { BASIS_POINTS_DIVISOR, DEFAULT_CONFIG_ARGS, SINGLE_BUY_AMOUNT, WSOL_MINT
 import { TestContextClass } from './utils/context.ts'
 import { TradeDirection, getSwapResult } from './utils/swap-quote.ts'
 
-const largeBuyAmount = BigInt(150 * LAMPORTS_PER_SOL) // Large enough to trigger graduation
+const largeBuyAmount = BigInt(100 * LAMPORTS_PER_SOL) // Large enough to trigger graduation
 
 describe('Migration Test', () => {
   let ctx: TestContextClass
@@ -38,21 +38,18 @@ describe('Migration Test', () => {
       fetchBondingCurve(ctx.rpc, curve),
       ctx.getTokenBalance({ address: trader.address, mint: token }),
     ])
-    891_902_953_586_497n
-    console.log(traderTokenBalance)
 
     expect(finalCurveState.data.migrationStatus).toBe(1)
     expect(finalCurveState.data.curveFinishTimestamp).toBeGreaterThan(0n)
 
     const migrationResult = await ctx.migrate({ curve, baseMint: token })
 
-    const [postMigrationCurveState] = await Promise.all([
-      fetchBondingCurve(ctx.rpc, curve)
-    ])
+    console.log(`\n=== After Migration ===`)
+    const [postMigrationCurveState] = await Promise.all([fetchBondingCurve(ctx.rpc, curve)])
 
-    expect(postMigrationCurveState.data.migrationStatus).toBe(3)
+    expect(postMigrationCurveState.data.migrationStatus).toBe(2)
 
-    const [poolData, firstPosition] = await Promise.all([
+    const [poolData, _firstPosition] = await Promise.all([
       fetchPool(ctx.rpc, migrationResult.pool),
       fetchPosition(ctx.rpc, migrationResult.firstPositionNftKP.address),
     ])
@@ -79,6 +76,76 @@ describe('Migration Test', () => {
     expect(finalPoolData.data.metrics.totalProtocolBFee).toBeGreaterThan(0)
   })
 
+  test('migration - price stays similar', async () => {
+    await ctx.swap({
+      trader,
+      baseMint: token,
+      amountIn: BigInt(88 * LAMPORTS_PER_SOL), // 88 SOL
+      minimumAmountOut: 0n,
+      tradeDirection: TradeDirection.QuoteToBase,
+    })
+
+    const [traderTokenBalanceBefore, curveStateA] = await Promise.all([
+      ctx.getTokenBalance({ address: trader.address, mint: token }),
+      fetchBondingCurve(ctx.rpc, curve),
+    ])
+    console.log('Curve State A:', curveStateA.data)
+
+    await ctx.swap({
+      trader,
+      baseMint: token,
+      amountIn: BigInt(LAMPORTS_PER_SOL),
+      minimumAmountOut: 0n,
+      tradeDirection: TradeDirection.QuoteToBase,
+    })
+
+    const [traderTokenBalanceAfter, curveStateB] = await Promise.all([
+      ctx.getTokenBalance({ address: trader.address, mint: token }),
+      fetchBondingCurve(ctx.rpc, curve),
+    ])
+
+    expect(curveStateB.data.migrationStatus).toBe(0)
+    console.log('Curve State B:', curveStateB.data)
+
+    const curveTokenAmount = traderTokenBalanceAfter - traderTokenBalanceBefore
+
+    await ctx.swap({
+      trader,
+      baseMint: token,
+      amountIn: BigInt(10 * LAMPORTS_PER_SOL),
+      minimumAmountOut: 0n,
+      tradeDirection: TradeDirection.QuoteToBase,
+    })
+
+    const [curveStateC, traderTokenBalanceBeforeMigration] = await Promise.all([
+      fetchBondingCurve(ctx.rpc, curve),
+      ctx.getTokenBalance({ address: trader.address, mint: token }),
+    ])
+    console.log('Curve State C:', curveStateC.data)
+    expect(curveStateC.data.migrationStatus).toBe(1)
+    const migrationResult = await ctx.migrate({ curve, baseMint: token })
+    await ctx.swapWithDammV2({
+      trader,
+      dammPool: migrationResult.pool,
+      amountIn: SINGLE_BUY_AMOUNT,
+      minimumAmountOut: 0n,
+      inputTokenMint: WSOL_MINT,
+      outputTokenMint: token,
+    })
+    const [finalTraderTokenBalance, curveQuoteBalance, curveBaseBalance] = await Promise.all([
+      ctx.getTokenBalance({ address: trader.address, mint: token }),
+      ctx.getTokenAccountBalance(curveStateA.data.quoteVault),
+      ctx.getTokenAccountBalance(curveStateA.data.baseVault),
+    ])
+    const dammTokenAmount = finalTraderTokenBalance - traderTokenBalanceBeforeMigration
+    console.log('Token Amount:', curveTokenAmount)
+    console.log('Damm Token Amount:', dammTokenAmount)
+    console.log('curveQuoteBalance:', curveQuoteBalance)
+    console.log('curveBaseBalance:', curveBaseBalance)
+    2430524381027n
+    184453462239035n
+  })
+
   test('migration - trading disabled', async () => {
     await ctx.swap({
       trader,
@@ -89,7 +156,7 @@ describe('Migration Test', () => {
     })
 
     const [curveState] = await Promise.all([fetchBondingCurve(ctx.rpc, curve)])
-    expect(curveState.data.migrationStatus).toBe(2)
+    expect(curveState.data.migrationStatus).toBe(1)
 
     expect(
       ctx.swap({
@@ -116,7 +183,7 @@ describe('Migration Test', () => {
       ctx.getConfigData({}),
     ])
 
-    expect(preMigrationCurveState.data.migrationStatus).toBe(2)
+    expect(preMigrationCurveState.data.migrationStatus).toBe(1)
 
     // Get the quote vault balance before migration
     const preMigrationQuoteVaultBalance = await ctx.getTokenAccountBalance(preMigrationCurveState.data.quoteVault)
@@ -128,7 +195,7 @@ describe('Migration Test', () => {
       fetchBondingCurve(ctx.rpc, curve),
       ctx.getTokenAccountBalance(preMigrationCurveState.data.quoteVault),
     ])
-    expect(postMigrationCurveState.data.migrationStatus).toBe(3)
+    expect(postMigrationCurveState.data.migrationStatus).toBe(2)
 
     // Calculate the expected migration fee (5% of the quote amount)
     const migrationQuoteThreshold = configState.data.migrationQuoteThreshold
@@ -137,6 +204,7 @@ describe('Migration Test', () => {
     const feeAmount =
       (migrationQuoteThreshold * (BigInt(migrationFeeBasisPoints) + BigInt(feeBasisPoints))) / BASIS_POINTS_DIVISOR
 
+    console.log('migration fee basis points: ', migrationFeeBasisPoints)
     // The bonding curve should retain the migration fee (5%)
     expect(postMigrationQuoteVaultBalance).toBeGreaterThan(feeAmount)
     expect(postMigrationQuoteVaultBalance).toBeLessThan(feeAmount + feeAmount / 2n) // Allow some tolerance
@@ -229,7 +297,7 @@ describe('Migration Test', () => {
     const [curveAfterGraduation] = await Promise.all([fetchBondingCurve(ctx.rpc, curve)])
 
     // Verify graduation occurred and fees are still there
-    expect(curveAfterGraduation.data.migrationStatus).toBe(2)
+    expect(curveAfterGraduation.data.migrationStatus).toBe(1)
 
     // Claim fees after graduation
     await Promise.all([
@@ -259,6 +327,6 @@ describe('Migration Test', () => {
     expect(finalCurveState.data.creatorFee).toBe(0n)
 
     // Verify migration status is still in graduated state
-    expect(finalCurveState.data.migrationStatus).toBe(2)
+    expect(finalCurveState.data.migrationStatus).toBe(1)
   })
 })

@@ -1,9 +1,4 @@
-import {
-  address,
-  createSolanaClient,
-  getExplorerLink,
-  signTransactionMessageWithSigners,
-} from 'gill'
+import { address, createSolanaClient, getExplorerLink, signTransactionMessageWithSigners } from 'gill'
 import { loadKeypairSignerFromFile } from 'gill/node'
 import { TOKEN_PROGRAM_ADDRESS } from 'gill/programs'
 import { getAssociatedTokenAccountAddress } from 'gill/programs/token'

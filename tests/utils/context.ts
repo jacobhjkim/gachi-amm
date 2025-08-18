@@ -287,7 +287,7 @@ export class TestContextClass {
     configAddress: Address
     creator: KeyPairSigner
     mintKeypair: KeyPairSigner
-    feeType: number,
+    feeType: number
     quoteMintAddress?: Address
     tokenMetadata?: {
       name: string
@@ -1022,6 +1022,7 @@ export class TestContextClass {
     ])
 
     // Get or create token accounts
+    // Note: prepareTokenAccounts returns ataTokenA for the first mint and ataTokenB for the second mint
     const {
       ataTokenA: inputTokenAccount,
       ataTokenB: outputTokenAccount,
@@ -1036,6 +1037,16 @@ export class TestContextClass {
       tokenBProgram: TOKEN_PROGRAM_ADDRESS,
     })
 
+    console.log(`\n=== Token Account Setup ===`)
+    console.log(`Input token mint (WSOL): ${inputTokenMint.toString()}`)
+    console.log(`Output token mint (custom): ${outputTokenMint.toString()}`)
+    console.log(`Input token account: ${inputTokenAccount.toString()}`)
+    console.log(`Output token account: ${outputTokenAccount.toString()}`)
+    console.log(`Pool tokenA mint: ${dammPoolState.data.tokenAMint.toString()}`)
+    console.log(`Pool tokenB mint: ${dammPoolState.data.tokenBMint.toString()}`)
+    console.log(`Pool tokenA vault: ${dammPoolState.data.tokenAVault.toString()}`)
+    console.log(`Pool tokenB vault: ${dammPoolState.data.tokenBVault.toString()}`)
+
     // Pre-instructions: create accounts if needed and wrap SOL to WSOL if needed
     const preInstructions = [...accountInstructions]
     if (inputTokenMint === WSOL_MINT && amountIn > 0n) {
@@ -1045,10 +1056,29 @@ export class TestContextClass {
     // Post-instructions: unwrap WSOL back to SOL if needed
     const postInstructions = unwrapIx ? [unwrapIx] : []
 
+    // CRITICAL: The swap instruction expects the accounts to match the pool's token order
+    // If input is WSOL and output is custom token, we need to figure out which is tokenA and which is tokenB
+    let swapInputAccount: Address
+    let swapOutputAccount: Address
+
+    if (dammPoolState.data.tokenAMint.toString() === inputTokenMint.toString()) {
+      // Input token (WSOL) is tokenA
+      swapInputAccount = inputTokenAccount
+      swapOutputAccount = outputTokenAccount
+      console.log(`Swap direction: tokenA (WSOL) -> tokenB (custom token)`)
+    } else if (dammPoolState.data.tokenBMint.toString() === inputTokenMint.toString()) {
+      // Input token (WSOL) is tokenB
+      swapInputAccount = inputTokenAccount
+      swapOutputAccount = outputTokenAccount
+      console.log(`Swap direction: tokenB (WSOL) -> tokenA (custom token)`)
+    } else {
+      throw new Error(`Input token ${inputTokenMint.toString()} doesn't match pool tokens`)
+    }
+
     const ix = await getDammSwapInstructionAsync({
       pool: dammPool,
-      inputTokenAccount,
-      outputTokenAccount,
+      inputTokenAccount: swapInputAccount,
+      outputTokenAccount: swapOutputAccount,
       tokenAVault: dammPoolState.data.tokenAVault,
       tokenBVault: dammPoolState.data.tokenBVault,
       tokenAMint: dammPoolState.data.tokenAMint,
@@ -1080,5 +1110,6 @@ export class TestContextClass {
         }),
       )
     }
+    return signature
   }
 }

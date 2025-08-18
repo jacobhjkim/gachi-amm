@@ -21,8 +21,6 @@ import {
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU128Decoder,
-  getU128Encoder,
   getU64Decoder,
   getU64Encoder,
   getU8Decoder,
@@ -71,8 +69,6 @@ export type BondingCurve = {
   quoteReserve: bigint;
   /** virtual quote reserve, used for price calculation */
   virtualQuoteReserve: bigint;
-  /** current sqrt_price */
-  sqrtPrice: bigint;
   /** curve type, spl token or token2022 */
   curveType: number;
   /** fee type, (0: project/creator, 1: meme/community, 2: blocked) */
@@ -112,8 +108,6 @@ export type BondingCurveArgs = {
   quoteReserve: number | bigint;
   /** virtual quote reserve, used for price calculation */
   virtualQuoteReserve: number | bigint;
-  /** current sqrt_price */
-  sqrtPrice: number | bigint;
   /** curve type, spl token or token2022 */
   curveType: number;
   /** fee type, (0: project/creator, 1: meme/community, 2: blocked) */
@@ -147,7 +141,6 @@ export function getBondingCurveEncoder(): FixedSizeEncoder<BondingCurveArgs> {
       ['virtualBaseReserve', getU64Encoder()],
       ['quoteReserve', getU64Encoder()],
       ['virtualQuoteReserve', getU64Encoder()],
-      ['sqrtPrice', getU128Encoder()],
       ['curveType', getU8Encoder()],
       ['feeType', getU8Encoder()],
       ['feeTypeReviewed', getU8Encoder()],
@@ -174,7 +167,6 @@ export function getBondingCurveDecoder(): FixedSizeDecoder<BondingCurve> {
     ['virtualBaseReserve', getU64Decoder()],
     ['quoteReserve', getU64Decoder()],
     ['virtualQuoteReserve', getU64Decoder()],
-    ['sqrtPrice', getU128Decoder()],
     ['curveType', getU8Decoder()],
     ['feeType', getU8Decoder()],
     ['feeTypeReviewed', getU8Decoder()],
@@ -248,5 +240,5 @@ export async function fetchAllMaybeBondingCurve(
 }
 
 export function getBondingCurveSize(): number {
-  return 248;
+  return 232;
 }

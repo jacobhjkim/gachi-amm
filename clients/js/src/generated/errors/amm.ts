@@ -84,6 +84,8 @@ export const AMM_ERROR__NOTHING_TO_CLAIM = 0x1790; // 6032
 export const AMM_ERROR__INVALID_FEE_TYPE = 0x1791; // 6033
 /** FeeTypeAlreadySet: setting the same fee type */
 export const AMM_ERROR__FEE_TYPE_ALREADY_SET = 0x1792; // 6034
+/** InvalidBaseVaultAmount: Invalid base vault amount */
+export const AMM_ERROR__INVALID_BASE_VAULT_AMOUNT = 0x1793; // 6035
 
 export type AmmError =
   | typeof AMM_ERROR__ACCOUNT_NOT_INACTIVE
@@ -94,6 +96,7 @@ export type AmmError =
   | typeof AMM_ERROR__INSUFFICIENT_LIQUIDITY_FOR_MIGRATION
   | typeof AMM_ERROR__INVALID_ACCOUNT
   | typeof AMM_ERROR__INVALID_AMM_CONFIG
+  | typeof AMM_ERROR__INVALID_BASE_VAULT_AMOUNT
   | typeof AMM_ERROR__INVALID_CASHBACK_TIER
   | typeof AMM_ERROR__INVALID_CASHBACK_TOKEN_ACCOUNT
   | typeof AMM_ERROR__INVALID_CONFIG_ACCOUNT
@@ -133,6 +136,7 @@ if (process.env.NODE_ENV !== 'production') {
     [AMM_ERROR__INSUFFICIENT_LIQUIDITY_FOR_MIGRATION]: `Insufficient liquidity for migration`,
     [AMM_ERROR__INVALID_ACCOUNT]: `Invalid account for the instruction`,
     [AMM_ERROR__INVALID_AMM_CONFIG]: `Invalid amm config`,
+    [AMM_ERROR__INVALID_BASE_VAULT_AMOUNT]: `Invalid base vault amount`,
     [AMM_ERROR__INVALID_CASHBACK_TIER]: `Invalid cashback tier`,
     [AMM_ERROR__INVALID_CASHBACK_TOKEN_ACCOUNT]: `Invalid cashback token account`,
     [AMM_ERROR__INVALID_CONFIG_ACCOUNT]: `Invalid config account`,

@@ -10,8 +10,6 @@ import {
   combineCodec,
   getStructDecoder,
   getStructEncoder,
-  getU128Decoder,
-  getU128Encoder,
   getU64Decoder,
   getU64Encoder,
   type FixedSizeCodec,
@@ -23,7 +21,6 @@ import {
 export type SwapResult = {
   actualInputAmount: bigint;
   outputAmount: bigint;
-  nextSqrtPrice: bigint;
   tradingFee: bigint;
   protocolFee: bigint;
   cashbackFee: bigint;
@@ -36,7 +33,6 @@ export type SwapResult = {
 export type SwapResultArgs = {
   actualInputAmount: number | bigint;
   outputAmount: number | bigint;
-  nextSqrtPrice: number | bigint;
   tradingFee: number | bigint;
   protocolFee: number | bigint;
   cashbackFee: number | bigint;
@@ -50,7 +46,6 @@ export function getSwapResultEncoder(): FixedSizeEncoder<SwapResultArgs> {
   return getStructEncoder([
     ['actualInputAmount', getU64Encoder()],
     ['outputAmount', getU64Encoder()],
-    ['nextSqrtPrice', getU128Encoder()],
     ['tradingFee', getU64Encoder()],
     ['protocolFee', getU64Encoder()],
     ['cashbackFee', getU64Encoder()],
@@ -65,7 +60,6 @@ export function getSwapResultDecoder(): FixedSizeDecoder<SwapResult> {
   return getStructDecoder([
     ['actualInputAmount', getU64Decoder()],
     ['outputAmount', getU64Decoder()],
-    ['nextSqrtPrice', getU128Decoder()],
     ['tradingFee', getU64Decoder()],
     ['protocolFee', getU64Decoder()],
     ['cashbackFee', getU64Decoder()],

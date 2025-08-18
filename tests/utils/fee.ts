@@ -64,20 +64,22 @@ export function calculateFees(
 ): FeeBreakdown {
   const hasReferrer = hasL1Referrer || hasL2Referrer || hasL3Referrer
 
-  const adjustedFeeBasisPoints = hasReferrer ? FEE_BASIS_POINTS - REFEREE_DISCOUNT_BASIS_POINTS : FEE_BASIS_POINTS
+  const adjustedFeeBasisPoints = BigInt(
+    hasReferrer ? FEE_BASIS_POINTS - REFEREE_DISCOUNT_BASIS_POINTS : FEE_BASIS_POINTS,
+  )
 
   const protocolFeeSum = (solAmount * adjustedFeeBasisPoints) / BASIS_POINTS_DIVISOR
 
-  const l1ReferralFee = hasL1Referrer ? (solAmount * L1_REFERRAL_FEE_BASIS_POINTS) / BASIS_POINTS_DIVISOR : 0n
+  const l1ReferralFee = hasL1Referrer ? (solAmount * BigInt(L1_REFERRAL_FEE_BASIS_POINTS)) / BASIS_POINTS_DIVISOR : 0n
 
-  const l2ReferralFee = hasL2Referrer ? (solAmount * L2_REFERRAL_FEE_BASIS_POINTS) / BASIS_POINTS_DIVISOR : 0n
+  const l2ReferralFee = hasL2Referrer ? (solAmount * BigInt(L2_REFERRAL_FEE_BASIS_POINTS)) / BASIS_POINTS_DIVISOR : 0n
 
-  const l3ReferralFee = hasL3Referrer ? (solAmount * L3_REFERRAL_FEE_BASIS_POINTS) / BASIS_POINTS_DIVISOR : 0n
+  const l3ReferralFee = hasL3Referrer ? (solAmount * BigInt(L3_REFERRAL_FEE_BASIS_POINTS)) / BASIS_POINTS_DIVISOR : 0n
 
   const cashbackBps = getCashbackBps(cashbackTier)
   const cashbackFee = (solAmount * cashbackBps) / BASIS_POINTS_DIVISOR
 
-  const creatorFee = (solAmount * CREATOR_FEE_BASIS_POINTS) / BASIS_POINTS_DIVISOR
+  const creatorFee = (solAmount * BigInt(CREATOR_FEE_BASIS_POINTS)) / BASIS_POINTS_DIVISOR
 
   const protocolFee = protocolFeeSum - l1ReferralFee - l2ReferralFee - l3ReferralFee - creatorFee - cashbackFee
 

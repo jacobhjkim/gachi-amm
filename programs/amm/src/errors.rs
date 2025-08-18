@@ -116,4 +116,8 @@ pub enum AmmError {
 
     #[msg("setting the same fee type")]
     FeeTypeAlreadySet,
+
+    // TODO: delete
+    #[msg("Invalid base vault amount")]
+    InvalidBaseVaultAmount,
 }

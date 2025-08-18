@@ -91,7 +91,8 @@ export type Config = {
   initialVirtualQuoteReserve: bigint;
   /** initial virtual base reserve to boost the initial liquidity */
   initialVirtualBaseReserve: bigint;
-  padding2: Array<bigint>;
+  /** for future use */
+  padding3: Array<bigint>;
 };
 
 export type ConfigArgs = {
@@ -133,7 +134,8 @@ export type ConfigArgs = {
   initialVirtualQuoteReserve: number | bigint;
   /** initial virtual base reserve to boost the initial liquidity */
   initialVirtualBaseReserve: number | bigint;
-  padding2: Array<number | bigint>;
+  /** for future use */
+  padding3: Array<number | bigint>;
 };
 
 export function getConfigEncoder(): FixedSizeEncoder<ConfigArgs> {
@@ -159,7 +161,7 @@ export function getConfigEncoder(): FixedSizeEncoder<ConfigArgs> {
       ['migrationQuoteThreshold', getU64Encoder()],
       ['initialVirtualQuoteReserve', getU64Encoder()],
       ['initialVirtualBaseReserve', getU64Encoder()],
-      ['padding2', getArrayEncoder(getU64Encoder(), { size: 4 })],
+      ['padding3', getArrayEncoder(getU64Encoder(), { size: 4 })],
     ]),
     (value) => ({ ...value, discriminator: CONFIG_DISCRIMINATOR })
   );
@@ -187,7 +189,7 @@ export function getConfigDecoder(): FixedSizeDecoder<Config> {
     ['migrationQuoteThreshold', getU64Decoder()],
     ['initialVirtualQuoteReserve', getU64Decoder()],
     ['initialVirtualBaseReserve', getU64Decoder()],
-    ['padding2', getArrayDecoder(getU64Decoder(), { size: 4 })],
+    ['padding3', getArrayDecoder(getU64Decoder(), { size: 4 })],
   ]);
 }
 

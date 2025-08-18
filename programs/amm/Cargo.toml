@@ -27,5 +27,6 @@ static_assertions = "1.1.0"
 ruint = "1.16.0"
 num_enum = "0.7.4"
 num-traits = "0.2.19"
+rust_decimal = { version = "1.36", features = ["maths"] }
 const-crypto = "0.3.0"
 damm-v2 = { path = "../../libs/damm-v2" }

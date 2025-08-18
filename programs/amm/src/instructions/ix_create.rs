@@ -1,4 +1,3 @@
-use std::cmp::{max, min};
 use {
     anchor_lang::prelude::*,
     anchor_spl::{
@@ -8,6 +7,7 @@ use {
             Mint as MintInterface, TokenAccount as TokenAccountInterface, TokenInterface,
         },
     },
+    std::cmp::{max, min},
 };
 
 use crate::{
@@ -18,7 +18,7 @@ use crate::{
     },
     errors::AmmError,
     events::EvtInitializeCurve,
-    states::{get_price, BondingCurve, Config, CurveType, TokenType},
+    states::{BondingCurve, Config, CurveType, TokenType},
     utils::{process_create_token_metadata, ProcessCreateTokenMetadataParams},
 };
 
@@ -224,11 +224,6 @@ pub fn handle_create_curve_spl_token(
         None,
     )?;
 
-    let initial_price = get_price(
-        config.initial_virtual_quote_reserve as u128,
-        config.initial_virtual_base_reserve as u128,
-    )?;
-
     // init curve
     let mut curve = ctx.accounts.curve.load_init()?;
 
@@ -238,7 +233,6 @@ pub fn handle_create_curve_spl_token(
         ctx.accounts.base_mint.key(),
         ctx.accounts.base_vault.key(),
         ctx.accounts.quote_vault.key(),
-        initial_price,
         CurveType::SplToken.into(),
         params.fee_type,
         initial_base_supply,
