@@ -36,11 +36,14 @@ const expectBondingCurveValues = (
   if (expected.baseReserve !== undefined) {
     expect(bondingCurve.data.baseReserve).toEqual(expected.baseReserve)
   }
+  if (expected.virtualBaseReserve !== undefined) {
+    expect(bondingCurve.data.virtualBaseReserve).toEqual(expected.virtualBaseReserve)
+  }
   if (expected.quoteReserve !== undefined) {
     expect(bondingCurve.data.quoteReserve).toEqual(expected.quoteReserve)
   }
-  if (expected.sqrtPrice !== undefined) {
-    expect(bondingCurve.data.sqrtPrice).toEqual(expected.sqrtPrice)
+  if (expected.virtualQuoteReserve !== undefined) {
+    expect(bondingCurve.data.virtualQuoteReserve).toEqual(expected.virtualQuoteReserve)
   }
   if (expected.curveType !== undefined) {
     expect(bondingCurve.data.curveType).toEqual(expected.curveType)
@@ -59,6 +62,12 @@ const expectBondingCurveValues = (
   }
   if (expected.protocolFee !== undefined) {
     expect(bondingCurve.data.protocolFee).toEqual(expected.protocolFee)
+  }
+  if (expected.feeType !== undefined) {
+    expect(bondingCurve.data.feeType).toEqual(expected.feeType)
+  }
+  if (expected.feeTypeReviewed !== undefined) {
+    expect(bondingCurve.data.feeTypeReviewed).toEqual(expected.feeTypeReviewed)
   }
 }
 
@@ -116,6 +125,7 @@ describe('Bonding Curve Creation Tests', () => {
       creator,
       mintKeypair,
       tokenMetadata: DEFAULT_TOKEN,
+      feeType: 0,
     })
 
     const [baseVaultAddress] = await getCurveVaultPda({
@@ -139,14 +149,17 @@ describe('Bonding Curve Creation Tests', () => {
       baseVault: baseVaultAddress,
       quoteVault: quoteVaultAddress,
       baseReserve: TOKEN_TOTAL_SUPPLY,
+      virtualBaseReserve: DEFAULT_CONFIG_ARGS.initialVirtualBaseReserve,
       quoteReserve: 0n,
-      sqrtPrice: configData.data.initialSqrtPrice,
+      virtualQuoteReserve: DEFAULT_CONFIG_ARGS.initialVirtualQuoteReserve,
       curveType: 0, // 0 for Token 2022
       isMigrated: 0,
       migrationStatus: 0,
       curveFinishTimestamp: 0n,
       creatorFee: 0n, // No fee for initial mint
       protocolFee: 0n, // No fee for initial mint
+      feeType: 0,
+      feeTypeReviewed: 0,
     })
 
     await verifyTokenMint(mintKeypair.address, {

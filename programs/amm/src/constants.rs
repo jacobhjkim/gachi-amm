@@ -41,13 +41,5 @@ pub mod seeds {
     pub const CURVE_PREFIX: &[u8] = b"curve";
     pub const TOKEN_VAULT_PREFIX: &[u8] = b"token_vault";
     pub const CASHBACK_PREFIX: &[u8] = b"cashback";
-    pub const CASHBACK_VAULT_PREFIX: &[u8] = b"cashback_vault";
     pub const CURVE_AUTHORITY_PREFIX: &[u8] = b"curve_authority";
-    pub const POSITION_PREFIX: &[u8] = b"position";
-    pub const POSITION_NFT_ACCOUNT_PREFIX: &[u8] = b"position_nft_account";
-    pub const TOKEN_BADGE_PREFIX: &[u8] = b"token_badge";
-    pub const REWARD_VAULT_PREFIX: &[u8] = b"reward_vault";
-    pub const METEORA_METADATA_PREFIX: &[u8] = b"meteora";
-    pub const DAMM_V2_METADATA_PREFIX: &[u8] = b"damm_v2";
-    pub const VIRTUAL_POOL_METADATA_PREFIX: &[u8] = b"virtual_pool_metadata";
 }

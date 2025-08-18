@@ -339,6 +339,13 @@ impl BondingCurve {
     ) -> Result<()> {
         require!(self.fee_type == 0, AmmError::InvalidFeeType);
 
+        if self.creator_fee == 0 {
+            // Even if there's no creator fee, we still need to update the fee type
+            self.fee_type = 1; // update fee type to meme/community
+            self.fee_type_reviewed = 1; // mark fee type as reviewed
+            return Ok(());
+        }
+
         require!(
             creator_fee_basis_points >= meme_fee_basis_points,
             AmmError::InvalidCreatorTradingFeePercentage
@@ -365,7 +372,7 @@ impl BondingCurve {
     }
 
     pub fn fee_type_update_to_blocked(&mut self) -> Result<()> {
-        require!(self.fee_type == 0, AmmError::InvalidFeeType);
+        require!(self.fee_type != 2, AmmError::InvalidFeeType); // Can't block if already blocked
         self.protocol_fee += self.creator_fee; // transfer all creator fee to protocol fee
         self.creator_fee = 0; // reset creator fee to 0
         self.fee_type = 2; // update fee type to blocked

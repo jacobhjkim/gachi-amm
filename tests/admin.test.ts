@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, test } from 'bun:test'
 import type { Address } from 'gill'
+import { generateKeyPairSigner } from 'gill'
 import type { Config, CreateConfigInstructionDataArgs, fetchConfig } from '~/clients'
 import {
   CREATOR_FEE_BASIS_POINTS,
@@ -17,10 +18,7 @@ import { TestContextClass } from './utils/context.ts'
 
 const expectConfigValues = (
   config: Awaited<ReturnType<typeof fetchConfig>>,
-  expected: Omit<
-    Config,
-    'discriminator' | 'padding1' | 'padding2' | 'migrationSqrtPrice' | 'migrationBaseThreshold' | 'swapBaseAmount'
-  >,
+  expected: Omit<Config, 'discriminator' | 'padding1' | 'padding2' | 'padding3'>,
 ) => {
   if (expected.quoteMint !== undefined) {
     expect(config.data.quoteMint.toString()).toEqual(expected.quoteMint)
@@ -28,14 +26,17 @@ const expectConfigValues = (
   if (expected.feeClaimer !== undefined) {
     expect(config.data.feeClaimer.toString()).toEqual(expected.feeClaimer)
   }
-  if (expected.tokenType !== undefined) {
-    expect(config.data.tokenType).toEqual(expected.tokenType)
+  if (expected.baseTokenFlag !== undefined) {
+    expect(config.data.baseTokenFlag).toEqual(expected.baseTokenFlag)
   }
   if (expected.quoteTokenFlag !== undefined) {
     expect(config.data.quoteTokenFlag).toEqual(expected.quoteTokenFlag)
   }
-  if (expected.tokenDecimal !== undefined) {
-    expect(config.data.tokenDecimal).toEqual(expected.tokenDecimal)
+  if (expected.baseDecimal !== undefined) {
+    expect(config.data.baseDecimal).toEqual(expected.baseDecimal)
+  }
+  if (expected.quoteDecimal !== undefined) {
+    expect(config.data.quoteDecimal).toEqual(expected.quoteDecimal)
   }
   if (expected.feeBasisPoints !== undefined) {
     expect(config.data.feeBasisPoints).toEqual(expected.feeBasisPoints)
@@ -58,14 +59,20 @@ const expectConfigValues = (
   if (expected.memeFeeBasisPoints !== undefined) {
     expect(config.data.memeFeeBasisPoints).toEqual(expected.memeFeeBasisPoints)
   }
-  if (expected.initialSqrtPrice !== undefined) {
-    expect(config.data.initialSqrtPrice).toEqual(expected.initialSqrtPrice)
+  if (expected.migrationFeeBasisPoints !== undefined) {
+    expect(config.data.migrationFeeBasisPoints).toEqual(expected.migrationFeeBasisPoints)
+  }
+  if (expected.migrationBaseThreshold !== undefined) {
+    expect(config.data.migrationBaseThreshold).toEqual(expected.migrationBaseThreshold)
   }
   if (expected.migrationQuoteThreshold !== undefined) {
     expect(config.data.migrationQuoteThreshold).toEqual(expected.migrationQuoteThreshold)
   }
-  if (expected.curve !== undefined) {
-    expect(config.data.curve.slice(0, 2)).toEqual(expected.curve)
+  if (expected.initialVirtualQuoteReserve !== undefined) {
+    expect(config.data.initialVirtualQuoteReserve).toEqual(expected.initialVirtualQuoteReserve)
+  }
+  if (expected.initialVirtualBaseReserve !== undefined) {
+    expect(config.data.initialVirtualBaseReserve).toEqual(expected.initialVirtualBaseReserve)
   }
 }
 
@@ -83,9 +90,10 @@ describe('Admin Config Tests', () => {
     expectConfigValues(config, {
       quoteMint: WSOL_MINT,
       feeClaimer: createConfigResult.feeClaimer.address,
-      tokenType: 0,
+      baseTokenFlag: 0,
       quoteTokenFlag: 0,
-      tokenDecimal: 6,
+      baseDecimal: 6,
+      quoteDecimal: 9,
       feeBasisPoints: FEE_BASIS_POINTS,
       l1ReferralFeeBasisPoints: L1_REFERRAL_FEE_BASIS_POINTS,
       l2ReferralFeeBasisPoints: L2_REFERRAL_FEE_BASIS_POINTS,
@@ -94,9 +102,10 @@ describe('Admin Config Tests', () => {
       creatorFeeBasisPoints: CREATOR_FEE_BASIS_POINTS,
       memeFeeBasisPoints: MEME_FEE_BASIS_POINTS,
       migrationFeeBasisPoints: MIGRATION_FEE_BASIS_POINTS,
-      initialSqrtPrice: DEFAULT_CONFIG_ARGS.initialSqrtPrice,
+      migrationBaseThreshold: DEFAULT_CONFIG_ARGS.migrationBaseThreshold,
       migrationQuoteThreshold: DEFAULT_CONFIG_ARGS.migrationQuoteThreshold,
-      curve: DEFAULT_CONFIG_ARGS.curve,
+      initialVirtualQuoteReserve: DEFAULT_CONFIG_ARGS.initialVirtualQuoteReserve,
+      initialVirtualBaseReserve: DEFAULT_CONFIG_ARGS.initialVirtualBaseReserve,
     })
   })
 
@@ -104,7 +113,7 @@ describe('Admin Config Tests', () => {
     const createConfigResult = await ctx.createConfig(
       {
         ...DEFAULT_CONFIG_ARGS,
-        tokenType: 1, // Token 2022
+        baseTokenFlag: 1, // Token 2022
       },
       WSOL_MINT,
     )
@@ -113,9 +122,10 @@ describe('Admin Config Tests', () => {
     expectConfigValues(config, {
       quoteMint: WSOL_MINT,
       feeClaimer: createConfigResult.feeClaimer.address,
-      tokenType: 1,
+      baseTokenFlag: 1,
       quoteTokenFlag: 0,
-      tokenDecimal: 6,
+      baseDecimal: 6,
+      quoteDecimal: 9,
       feeBasisPoints: FEE_BASIS_POINTS,
       l1ReferralFeeBasisPoints: L1_REFERRAL_FEE_BASIS_POINTS,
       l2ReferralFeeBasisPoints: L2_REFERRAL_FEE_BASIS_POINTS,
@@ -124,37 +134,10 @@ describe('Admin Config Tests', () => {
       creatorFeeBasisPoints: CREATOR_FEE_BASIS_POINTS,
       memeFeeBasisPoints: MEME_FEE_BASIS_POINTS,
       migrationFeeBasisPoints: MIGRATION_FEE_BASIS_POINTS,
-      initialSqrtPrice: DEFAULT_CONFIG_ARGS.initialSqrtPrice,
+      migrationBaseThreshold: DEFAULT_CONFIG_ARGS.migrationBaseThreshold,
       migrationQuoteThreshold: DEFAULT_CONFIG_ARGS.migrationQuoteThreshold,
-      curve: DEFAULT_CONFIG_ARGS.curve,
-    })
-  })
-
-  test.skip('create config - quote mint token2022', async () => {
-    // TODO: mint token 2022
-    const createConfigResult = await ctx.createConfig(
-      DEFAULT_CONFIG_ARGS,
-      WSOL_MINT, // TODO: replace with token 2022 mint address
-    )
-    const config = await ctx.getConfigData({ configAddress: createConfigResult.configAddress })
-
-    expectConfigValues(config, {
-      quoteMint: WSOL_MINT,
-      feeClaimer: createConfigResult.feeClaimer.address,
-      tokenType: 0,
-      quoteTokenFlag: 1, // Token 2022 for quote mint
-      tokenDecimal: 6,
-      feeBasisPoints: FEE_BASIS_POINTS,
-      l1ReferralFeeBasisPoints: L1_REFERRAL_FEE_BASIS_POINTS,
-      l2ReferralFeeBasisPoints: L2_REFERRAL_FEE_BASIS_POINTS,
-      l3ReferralFeeBasisPoints: L3_REFERRAL_FEE_BASIS_POINTS,
-      refereeDiscountBasisPoints: REFEREE_DISCOUNT_BASIS_POINTS,
-      creatorFeeBasisPoints: CREATOR_FEE_BASIS_POINTS,
-      memeFeeBasisPoints: MEME_FEE_BASIS_POINTS,
-      migrationFeeBasisPoints: MIGRATION_FEE_BASIS_POINTS,
-      initialSqrtPrice: DEFAULT_CONFIG_ARGS.initialSqrtPrice,
-      migrationQuoteThreshold: DEFAULT_CONFIG_ARGS.migrationQuoteThreshold,
-      curve: DEFAULT_CONFIG_ARGS.curve,
+      initialVirtualQuoteReserve: DEFAULT_CONFIG_ARGS.initialVirtualQuoteReserve,
+      initialVirtualBaseReserve: DEFAULT_CONFIG_ARGS.initialVirtualBaseReserve,
     })
   })
 
@@ -177,7 +160,7 @@ describe('Admin Config Tests', () => {
         name: 'rejects invalid token type (> 1)',
         args: {
           ...baseValidArgs,
-          tokenType: 2,
+          baseTokenFlag: 2,
         },
         quoteMint: WSOL_MINT,
         expectedError: 'InvalidTokenType',
@@ -186,7 +169,7 @@ describe('Admin Config Tests', () => {
         name: 'rejects invalid token decimal (< 6)',
         args: {
           ...baseValidArgs,
-          tokenDecimal: 5,
+          baseDecimal: 5,
         },
         quoteMint: WSOL_MINT,
         expectedError: 'InvalidTokenDecimals',
@@ -195,7 +178,7 @@ describe('Admin Config Tests', () => {
         name: 'rejects invalid token decimal (> 9)',
         args: {
           ...baseValidArgs,
-          tokenDecimal: 10,
+          baseDecimal: 10,
         },
         quoteMint: WSOL_MINT,
         expectedError: 'InvalidTokenDecimals',
@@ -262,82 +245,6 @@ describe('Admin Config Tests', () => {
         quoteMint: WSOL_MINT,
         expectedError: 'InvalidQuoteThreshold',
       },
-      {
-        name: 'rejects initial sqrt price below minimum',
-        args: {
-          ...baseValidArgs,
-          initialSqrtPrice: 4295048015n, // < MIN_SQRT_PRICE
-        },
-        quoteMint: WSOL_MINT,
-        expectedError: 'InvalidCurve',
-      },
-      {
-        name: 'rejects initial sqrt price above maximum',
-        args: {
-          ...baseValidArgs,
-          initialSqrtPrice: 79226673521066979257578248092n, // > MAX_SQRT_PRICE
-        },
-        quoteMint: WSOL_MINT,
-        expectedError: 'InvalidCurve',
-      },
-      {
-        name: 'rejects empty curve',
-        args: {
-          ...baseValidArgs,
-          curve: [],
-        },
-        quoteMint: WSOL_MINT,
-        expectedError: 'InvalidCurve',
-      },
-      {
-        name: 'rejects curve with too many points (> 3)',
-        args: {
-          ...baseValidArgs,
-          curve: [
-            { sqrtPrice: 4295048018n, liquidity: 1000n },
-            { sqrtPrice: 4295048019n, liquidity: 2000n },
-            { sqrtPrice: 4295048020n, liquidity: 3000n },
-            { sqrtPrice: 4295048021n, liquidity: 4000n }, // 4th point, should fail
-          ],
-        },
-        quoteMint: WSOL_MINT,
-        expectedError: 'InvalidCurve',
-      },
-      {
-        name: 'rejects curve first point price <= initial price',
-        args: {
-          ...baseValidArgs,
-          initialSqrtPrice: 4295048020n,
-          curve: [
-            { sqrtPrice: 4295048020n, liquidity: 1000n }, // same as initial, should fail
-          ],
-        },
-        quoteMint: WSOL_MINT,
-        expectedError: 'InvalidCurve',
-      },
-      {
-        name: 'rejects curve with zero liquidity',
-        args: {
-          ...baseValidArgs,
-          curve: [
-            { sqrtPrice: 4295048018n, liquidity: 0n }, // zero liquidity, should fail
-          ],
-        },
-        quoteMint: WSOL_MINT,
-        expectedError: 'InvalidCurve',
-      },
-      {
-        name: 'rejects curve with non-increasing prices',
-        args: {
-          ...baseValidArgs,
-          curve: [
-            { sqrtPrice: 4295048020n, liquidity: 1000n },
-            { sqrtPrice: 4295048019n, liquidity: 2000n }, // decreasing price, should fail
-          ],
-        },
-        quoteMint: WSOL_MINT,
-        expectedError: 'InvalidCurve',
-      },
     ]
 
     for (const { name, args, quoteMint = WSOL_MINT, expectedError } of validationTests) {
@@ -345,5 +252,73 @@ describe('Admin Config Tests', () => {
         expect(ctx.createConfig(args, quoteMint)).rejects.toThrow()
       })
     }
+  })
+
+  test('handle_set_fee_type', async () => {
+    // Create a fresh config
+    const createConfigResult = await ctx.createConfig(DEFAULT_CONFIG_ARGS, WSOL_MINT)
+    const configAddress = createConfigResult.configAddress
+
+    // Create a fresh bonding curve with initial fee type as Creator (0)
+    const creator = await ctx.createTestTrader()
+    const mintKeypair = await generateKeyPairSigner()
+
+    const createCurveResult = await ctx.createBondingCurveAndMintToken({
+      configAddress,
+      creator,
+      mintKeypair,
+      feeType: 0, // Start with Creator fee type
+      tokenMetadata: {
+        name: 'Test Token',
+        symbol: 'TEST',
+        uri: 'https://test.com/metadata.json',
+      },
+    })
+
+    // Get initial curve data
+    let curveData = await ctx.getCurveData({ curveAddress: createCurveResult.curvePda })
+    expect(curveData.data.feeType).toEqual(0) // Should be Creator (0)
+
+    // Change fee type to Meme (1)
+    await ctx.setFeeType({
+      curveAddress: createCurveResult.curvePda,
+      configAddress,
+      newFeeType: 1,
+    })
+
+    // Verify fee type changed to Meme
+    curveData = await ctx.getCurveData({ curveAddress: createCurveResult.curvePda })
+    expect(curveData.data.feeType).toEqual(1) // Should be Meme (1)
+
+    // Change fee type to Blocked (2)
+    await ctx.setFeeType({
+      curveAddress: createCurveResult.curvePda,
+      configAddress,
+      newFeeType: 2,
+    })
+
+    // Verify fee type changed to Blocked
+    curveData = await ctx.getCurveData({ curveAddress: createCurveResult.curvePda })
+    expect(curveData.data.feeType).toEqual(2) // Should be Blocked (2)
+
+    // Test that trying to set the same fee type fails
+    expect(
+      ctx.setFeeType({
+        curveAddress: createCurveResult.curvePda,
+        configAddress,
+        newFeeType: 2, // Same as current
+      }),
+    ).rejects.toThrow()
+
+    // Test that non-owner cannot change fee type
+    const nonOwner = await ctx.createTestTrader()
+    expect(
+      ctx.setFeeType({
+        curveAddress: createCurveResult.curvePda,
+        configAddress,
+        newFeeType: 0,
+        payer: nonOwner,
+      }),
+    ).rejects.toThrow()
   })
 })

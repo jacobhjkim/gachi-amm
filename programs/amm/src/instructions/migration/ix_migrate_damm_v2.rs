@@ -5,11 +5,9 @@ use anchor_spl::{
     token_interface::{TokenAccount, TokenInterface},
 };
 use damm_v2::types::InitializePoolParameters;
-use ruint::aliases::U256;
 use ruint::aliases::U512;
 use std::u64;
 
-use crate::program::Amm;
 use crate::{
     assert_eq_admin, const_pda,
     constants::{MAX_SQRT_PRICE, MIN_SQRT_PRICE},
@@ -19,7 +17,6 @@ use crate::{
     params::liquidity_distribution::get_sqrt_price_from_amounts,
     safe_math::SafeMath,
     states::{BondingCurve, Config, MigrationAmount, MigrationStatus},
-    u128x128_math::{mul_div_u256, Rounding},
 };
 
 #[event_cpi]
