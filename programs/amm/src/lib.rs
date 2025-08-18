@@ -66,11 +66,6 @@ pub mod amm {
         handle_swap(ctx, params)
     }
 
-    /// create locker for vesting tokens
-    pub fn create_locker(ctx: Context<CreateLockerCtx>) -> Result<()> {
-        handle_create_locker(ctx)
-    }
-
     /// migrate the bonding curve to Meteora DAMM v2
     pub fn migrate_damm_v2<'c: 'info, 'info>(
         ctx: Context<'_, '_, 'c, 'info, MigrateDammV2Ctx<'info>>,
@@ -119,11 +114,34 @@ pub mod amm {
         handle_update_cashback_tier(ctx, new_tier)
     }
 
+    /// Claim protocol fee from the bonding curve
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - The accounts needed by the instruction.
+    ///
     pub fn claim_protocol_fee(ctx: Context<ClaimProtocolFeeCtx>) -> Result<()> {
         handle_claim_protocol_fee(ctx)
     }
 
+    /// Claim creator fee from the bonding curve
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - The accounts needed by the instruction.
+    ///
     pub fn claim_creator_fee(ctx: Context<ClaimCreatorFeeCtx>) -> Result<()> {
         handle_claim_creator_fee(ctx)
+    }
+
+    /// Set the fee type for the bonding curve
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - The accounts needed by the instruction.
+    /// * `new_fee_type` - The new fee type to set (0 for creator, 1 for meme, 2 for blocked).
+    ///
+    pub fn set_fee_type(ctx: Context<SetFeeTypeCtx>, new_fee_type: u8) -> Result<()> {
+        handle_set_fee_type(ctx, new_fee_type)
     }
 }

@@ -14,6 +14,7 @@ use crate::{
     curve::{get_initial_liquidity_from_delta_base, get_initial_liquidity_from_delta_quote},
     errors::AmmError,
     events::EvtMigrateDammV2,
+    params::liquidity_distribution::get_sqrt_price_from_amounts,
     safe_math::SafeMath,
     states::{BondingCurve, Config, MigrationAmount, MigrationStatus},
 };
@@ -276,20 +277,26 @@ pub fn handle_migrate_damm_v2<'c: 'info, 'info>(
     let mut curve = ctx.accounts.curve.load_mut()?;
 
     require!(
-        curve.get_migration_progress()? == MigrationStatus::LockedVesting,
+        curve.get_migration_progress()? == MigrationStatus::PostBondingCurve,
         AmmError::NotPermitToDoThisAction
     );
 
     require!(
-        curve.is_curve_complete(config.migration_quote_threshold),
+        curve.is_curve_complete(config.migration_base_threshold),
         AmmError::PoolIsIncompleted
     );
 
     let initial_quote_vault_amount = ctx.accounts.quote_vault.amount;
     let initial_base_vault_amount = ctx.accounts.base_vault.amount;
-    let migration_sqrt_price = config.migration_sqrt_price;
+    let MigrationAmount { quote_amount, fee } = config.get_migration_quote_amount()?;
 
-    let MigrationAmount { quote_amount, .. } = config.get_migration_quote_amount()?;
+    // Calculate the sqrt price from the amounts
+    let migration_sqrt_price = get_sqrt_price_from_amounts(
+        initial_base_vault_amount as u128,
+        quote_amount as u128,
+        config.base_decimal,
+        config.quote_decimal,
+    )?;
 
     // calculate initial liquidity
     let initial_liquidity = get_liquidity_for_adding_liquidity(
@@ -303,7 +310,7 @@ pub fn handle_migrate_damm_v2<'c: 'info, 'info>(
     ctx.accounts.create_pool(
         ctx.remaining_accounts[0].clone(),
         initial_liquidity,
-        config.migration_sqrt_price,
+        migration_sqrt_price,
         const_pda::curve_authority::BUMP,
     )?;
     // lock permanent liquidity
@@ -347,7 +354,7 @@ pub fn handle_migrate_damm_v2<'c: 'info, 'info>(
         deposited_base_amount,
         deposited_quote_amount,
         initial_liquidity,
-        sqrt_price: config.migration_sqrt_price,
+        sqrt_price: migration_sqrt_price,
     });
 
     Ok(())

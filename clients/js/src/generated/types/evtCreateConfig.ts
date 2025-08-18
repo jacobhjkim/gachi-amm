@@ -10,12 +10,8 @@ import {
   combineCodec,
   getAddressDecoder,
   getAddressEncoder,
-  getArrayDecoder,
-  getArrayEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU128Decoder,
-  getU128Encoder,
   getU16Decoder,
   getU16Encoder,
   getU64Decoder,
@@ -23,23 +19,18 @@ import {
   getU8Decoder,
   getU8Encoder,
   type Address,
-  type Codec,
-  type Decoder,
-  type Encoder,
+  type FixedSizeCodec,
+  type FixedSizeDecoder,
+  type FixedSizeEncoder,
 } from '@solana/kit';
-import {
-  getLiquidityDistributionParametersDecoder,
-  getLiquidityDistributionParametersEncoder,
-  type LiquidityDistributionParameters,
-  type LiquidityDistributionParametersArgs,
-} from '.';
 
 /** Create config */
 export type EvtCreateConfig = {
   config: Address;
-  tokenType: number;
+  baseTokenFlag: number;
   quoteTokenFlag: number;
-  tokenDecimal: number;
+  baseDecimal: number;
+  quoteDecimal: number;
   quoteMint: Address;
   feeBasisPoints: number;
   l1ReferralFeeBasisPoints: number;
@@ -48,19 +39,18 @@ export type EvtCreateConfig = {
   creatorFeeBasisPoints: number;
   migrationFeeBasisPoints: number;
   feeClaimer: Address;
-  initialSqrtPrice: bigint;
-  migrationSqrtPrice: bigint;
-  migrationQuoteThreshold: bigint;
   migrationBaseThreshold: bigint;
-  swapBaseAmount: bigint;
-  curve: Array<LiquidityDistributionParameters>;
+  migrationQuoteThreshold: bigint;
+  initialVirtualQuoteReserve: bigint;
+  initialVirtualBaseReserve: bigint;
 };
 
 export type EvtCreateConfigArgs = {
   config: Address;
-  tokenType: number;
+  baseTokenFlag: number;
   quoteTokenFlag: number;
-  tokenDecimal: number;
+  baseDecimal: number;
+  quoteDecimal: number;
   quoteMint: Address;
   feeBasisPoints: number;
   l1ReferralFeeBasisPoints: number;
@@ -69,20 +59,19 @@ export type EvtCreateConfigArgs = {
   creatorFeeBasisPoints: number;
   migrationFeeBasisPoints: number;
   feeClaimer: Address;
-  initialSqrtPrice: number | bigint;
-  migrationSqrtPrice: number | bigint;
-  migrationQuoteThreshold: number | bigint;
   migrationBaseThreshold: number | bigint;
-  swapBaseAmount: number | bigint;
-  curve: Array<LiquidityDistributionParametersArgs>;
+  migrationQuoteThreshold: number | bigint;
+  initialVirtualQuoteReserve: number | bigint;
+  initialVirtualBaseReserve: number | bigint;
 };
 
-export function getEvtCreateConfigEncoder(): Encoder<EvtCreateConfigArgs> {
+export function getEvtCreateConfigEncoder(): FixedSizeEncoder<EvtCreateConfigArgs> {
   return getStructEncoder([
     ['config', getAddressEncoder()],
-    ['tokenType', getU8Encoder()],
+    ['baseTokenFlag', getU8Encoder()],
     ['quoteTokenFlag', getU8Encoder()],
-    ['tokenDecimal', getU8Encoder()],
+    ['baseDecimal', getU8Encoder()],
+    ['quoteDecimal', getU8Encoder()],
     ['quoteMint', getAddressEncoder()],
     ['feeBasisPoints', getU16Encoder()],
     ['l1ReferralFeeBasisPoints', getU16Encoder()],
@@ -91,21 +80,20 @@ export function getEvtCreateConfigEncoder(): Encoder<EvtCreateConfigArgs> {
     ['creatorFeeBasisPoints', getU16Encoder()],
     ['migrationFeeBasisPoints', getU16Encoder()],
     ['feeClaimer', getAddressEncoder()],
-    ['initialSqrtPrice', getU128Encoder()],
-    ['migrationSqrtPrice', getU128Encoder()],
-    ['migrationQuoteThreshold', getU64Encoder()],
     ['migrationBaseThreshold', getU64Encoder()],
-    ['swapBaseAmount', getU64Encoder()],
-    ['curve', getArrayEncoder(getLiquidityDistributionParametersEncoder())],
+    ['migrationQuoteThreshold', getU64Encoder()],
+    ['initialVirtualQuoteReserve', getU64Encoder()],
+    ['initialVirtualBaseReserve', getU64Encoder()],
   ]);
 }
 
-export function getEvtCreateConfigDecoder(): Decoder<EvtCreateConfig> {
+export function getEvtCreateConfigDecoder(): FixedSizeDecoder<EvtCreateConfig> {
   return getStructDecoder([
     ['config', getAddressDecoder()],
-    ['tokenType', getU8Decoder()],
+    ['baseTokenFlag', getU8Decoder()],
     ['quoteTokenFlag', getU8Decoder()],
-    ['tokenDecimal', getU8Decoder()],
+    ['baseDecimal', getU8Decoder()],
+    ['quoteDecimal', getU8Decoder()],
     ['quoteMint', getAddressDecoder()],
     ['feeBasisPoints', getU16Decoder()],
     ['l1ReferralFeeBasisPoints', getU16Decoder()],
@@ -114,16 +102,14 @@ export function getEvtCreateConfigDecoder(): Decoder<EvtCreateConfig> {
     ['creatorFeeBasisPoints', getU16Decoder()],
     ['migrationFeeBasisPoints', getU16Decoder()],
     ['feeClaimer', getAddressDecoder()],
-    ['initialSqrtPrice', getU128Decoder()],
-    ['migrationSqrtPrice', getU128Decoder()],
-    ['migrationQuoteThreshold', getU64Decoder()],
     ['migrationBaseThreshold', getU64Decoder()],
-    ['swapBaseAmount', getU64Decoder()],
-    ['curve', getArrayDecoder(getLiquidityDistributionParametersDecoder())],
+    ['migrationQuoteThreshold', getU64Decoder()],
+    ['initialVirtualQuoteReserve', getU64Decoder()],
+    ['initialVirtualBaseReserve', getU64Decoder()],
   ]);
 }
 
-export function getEvtCreateConfigCodec(): Codec<
+export function getEvtCreateConfigCodec(): FixedSizeCodec<
   EvtCreateConfigArgs,
   EvtCreateConfig
 > {

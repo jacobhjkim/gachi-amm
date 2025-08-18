@@ -1,7 +1,4 @@
-use crate::{
-    params::liquidity_distribution::LiquidityDistributionParameters,
-    states::bonding_curve::SwapResult, SwapParameters,
-};
+use crate::{states::bonding_curve::SwapResult, SwapParameters};
 use anchor_lang::prelude::*;
 
 /// Create config
@@ -10,9 +7,10 @@ pub struct EvtCreateConfig {
     pub config: Pubkey,
 
     /* Token configurations */
-    pub token_type: u8,
+    pub base_token_flag: u8,
     pub quote_token_flag: u8,
-    pub token_decimal: u8,
+    pub base_decimal: u8,
+    pub quote_decimal: u8,
     pub quote_mint: Pubkey,
 
     /* Fee configurations */
@@ -25,12 +23,10 @@ pub struct EvtCreateConfig {
     pub fee_claimer: Pubkey,
 
     /* Price configurations */
-    pub initial_sqrt_price: u128,
-    pub migration_sqrt_price: u128,
-    pub migration_quote_threshold: u64,
     pub migration_base_threshold: u64,
-    pub swap_base_amount: u64,
-    pub curve: Vec<LiquidityDistributionParameters>,
+    pub migration_quote_threshold: u64,
+    pub initial_virtual_quote_reserve: u64,
+    pub initial_virtual_base_reserve: u64,
 }
 
 #[event]
@@ -61,16 +57,6 @@ pub struct EvtCurveComplete {
 }
 
 #[event]
-pub struct EvtCreateLocker {
-    pub curve: Pubkey,
-    pub config: Pubkey,
-    pub creator: Pubkey,
-    pub base_mint: Pubkey,
-    pub escrow: Pubkey,
-    pub base_amount: u64,
-}
-
-#[event]
 pub struct EvtMigrateDammV2 {
     pub curve: Pubkey,
     pub config: Pubkey,
@@ -94,4 +80,12 @@ pub struct EvtClaimCreatorTradingFee {
     pub curve: Pubkey,
     pub creator: Pubkey,
     pub quote_token_claim_amount: u64,
+}
+
+#[event]
+pub struct EvtSetFeeType {
+    pub curve: Pubkey,
+    pub base_mint: Pubkey,
+    pub old_fee_type: u8,
+    pub new_fee_type: u8,
 }

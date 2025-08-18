@@ -72,22 +72,25 @@ export const AMM_ERROR__INVALID_QUOTE_THRESHOLD = 0x178a; // 6026
 export const AMM_ERROR__INVALID_CURVE = 0x178b; // 6027
 /** InvalidCreatorTradingFeePercentage: Invalid creator trading fee percentage */
 export const AMM_ERROR__INVALID_CREATOR_TRADING_FEE_PERCENTAGE = 0x178c; // 6028
-/** InvalidVestingParameters: Invalid vesting parameters */
-export const AMM_ERROR__INVALID_VESTING_PARAMETERS = 0x178d; // 6029
 /** NotPermitToDoThisAction: Not permit to do this action */
-export const AMM_ERROR__NOT_PERMIT_TO_DO_THIS_ACTION = 0x178e; // 6030
+export const AMM_ERROR__NOT_PERMIT_TO_DO_THIS_ACTION = 0x178d; // 6029
 /** MissingPoolConfigInRemainingAccount: Missing pool config in remaining account */
-export const AMM_ERROR__MISSING_POOL_CONFIG_IN_REMAINING_ACCOUNT = 0x178f; // 6031
+export const AMM_ERROR__MISSING_POOL_CONFIG_IN_REMAINING_ACCOUNT = 0x178e; // 6030
 /** UnsupportNativeMintToken2022: Unsupport native mint token 2022 */
-export const AMM_ERROR__UNSUPPORT_NATIVE_MINT_TOKEN2022 = 0x1790; // 6032
+export const AMM_ERROR__UNSUPPORT_NATIVE_MINT_TOKEN2022 = 0x178f; // 6031
 /** NothingToClaim: Nothing to claim */
-export const AMM_ERROR__NOTHING_TO_CLAIM = 0x1791; // 6033
+export const AMM_ERROR__NOTHING_TO_CLAIM = 0x1790; // 6032
+/** InvalidFeeType: Invalid fee type */
+export const AMM_ERROR__INVALID_FEE_TYPE = 0x1791; // 6033
+/** FeeTypeAlreadySet: setting the same fee type */
+export const AMM_ERROR__FEE_TYPE_ALREADY_SET = 0x1792; // 6034
 
 export type AmmError =
   | typeof AMM_ERROR__ACCOUNT_NOT_INACTIVE
   | typeof AMM_ERROR__AMOUNT_IS_ZERO
   | typeof AMM_ERROR__CLAIM_COOLDOWN_NOT_MET
   | typeof AMM_ERROR__EXCEEDED_SLIPPAGE
+  | typeof AMM_ERROR__FEE_TYPE_ALREADY_SET
   | typeof AMM_ERROR__INSUFFICIENT_LIQUIDITY_FOR_MIGRATION
   | typeof AMM_ERROR__INVALID_ACCOUNT
   | typeof AMM_ERROR__INVALID_AMM_CONFIG
@@ -97,6 +100,7 @@ export type AmmError =
   | typeof AMM_ERROR__INVALID_CREATOR_TRADING_FEE_PERCENTAGE
   | typeof AMM_ERROR__INVALID_CURVE
   | typeof AMM_ERROR__INVALID_FEE_BASIS_POINTS
+  | typeof AMM_ERROR__INVALID_FEE_TYPE
   | typeof AMM_ERROR__INVALID_MIGRATION_CALCULATION
   | typeof AMM_ERROR__INVALID_QUOTE_MINT
   | typeof AMM_ERROR__INVALID_QUOTE_THRESHOLD
@@ -105,7 +109,6 @@ export type AmmError =
   | typeof AMM_ERROR__INVALID_TOKEN_SYMBOL
   | typeof AMM_ERROR__INVALID_TOKEN_TYPE
   | typeof AMM_ERROR__INVALID_TOKEN_URI
-  | typeof AMM_ERROR__INVALID_VESTING_PARAMETERS
   | typeof AMM_ERROR__MATH_OVERFLOW
   | typeof AMM_ERROR__MISSING_POOL_CONFIG_IN_REMAINING_ACCOUNT
   | typeof AMM_ERROR__NO_CASHBACK_TO_CLAIM
@@ -126,6 +129,7 @@ if (process.env.NODE_ENV !== 'production') {
     [AMM_ERROR__AMOUNT_IS_ZERO]: `Amount is zero`,
     [AMM_ERROR__CLAIM_COOLDOWN_NOT_MET]: `Claim cooldown period not met`,
     [AMM_ERROR__EXCEEDED_SLIPPAGE]: `Exceeded slippage tolerance`,
+    [AMM_ERROR__FEE_TYPE_ALREADY_SET]: `setting the same fee type`,
     [AMM_ERROR__INSUFFICIENT_LIQUIDITY_FOR_MIGRATION]: `Insufficient liquidity for migration`,
     [AMM_ERROR__INVALID_ACCOUNT]: `Invalid account for the instruction`,
     [AMM_ERROR__INVALID_AMM_CONFIG]: `Invalid amm config`,
@@ -135,6 +139,7 @@ if (process.env.NODE_ENV !== 'production') {
     [AMM_ERROR__INVALID_CREATOR_TRADING_FEE_PERCENTAGE]: `Invalid creator trading fee percentage`,
     [AMM_ERROR__INVALID_CURVE]: `Invalid curve`,
     [AMM_ERROR__INVALID_FEE_BASIS_POINTS]: `Invalid fee basis points`,
+    [AMM_ERROR__INVALID_FEE_TYPE]: `Invalid fee type`,
     [AMM_ERROR__INVALID_MIGRATION_CALCULATION]: `Invalid migration calculation`,
     [AMM_ERROR__INVALID_QUOTE_MINT]: `Invalid quote mint`,
     [AMM_ERROR__INVALID_QUOTE_THRESHOLD]: `Invalid quote threshold`,
@@ -143,7 +148,6 @@ if (process.env.NODE_ENV !== 'production') {
     [AMM_ERROR__INVALID_TOKEN_SYMBOL]: `Invalid token symbol: must be 1-10 characters`,
     [AMM_ERROR__INVALID_TOKEN_TYPE]: `Invalid token type`,
     [AMM_ERROR__INVALID_TOKEN_URI]: `Invalid token URI: must be 1-200 characters`,
-    [AMM_ERROR__INVALID_VESTING_PARAMETERS]: `Invalid vesting parameters`,
     [AMM_ERROR__MATH_OVERFLOW]: `Math operation overflow`,
     [AMM_ERROR__MISSING_POOL_CONFIG_IN_REMAINING_ACCOUNT]: `Missing pool config in remaining account`,
     [AMM_ERROR__NO_CASHBACK_TO_CLAIM]: `No cashback available to claim`,

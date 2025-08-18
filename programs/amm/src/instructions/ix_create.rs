@@ -18,15 +18,39 @@ use crate::{
     },
     errors::AmmError,
     events::EvtInitializeCurve,
-    states::{BondingCurve, Config, CurveType, TokenType},
+    states::{get_price, BondingCurve, Config, CurveType, TokenType},
     utils::{process_create_token_metadata, ProcessCreateTokenMetadataParams},
 };
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
 pub struct CreateCurveParams {
+    /// Name of the token to be created
     pub name: String,
+    /// Symbol (ticker) of the token to be created
     pub symbol: String,
+    /// URI for the token metadata
     pub uri: String,
+    /// 0: project/creator, 1: meme/community, 2: blocked
+    pub fee_type: u8,
+}
+
+impl CreateCurveParams {
+    pub fn validate(&self) -> Result<()> {
+        require!(
+            self.name.len() <= MAX_NAME_LENGTH && !self.name.is_empty(),
+            AmmError::InvalidTokenName
+        );
+        require!(
+            self.symbol.len() <= MAX_SYMBOL_LENGTH && !self.symbol.is_empty(),
+            AmmError::InvalidTokenSymbol
+        );
+        require!(
+            self.uri.len() <= MAX_URI_LENGTH && !self.uri.is_empty(),
+            AmmError::InvalidTokenUri
+        );
+        require!(self.fee_type <= 2, AmmError::InvalidAmmConfig);
+        Ok(())
+    }
 }
 
 // To fix IDL generation: https://github.com/coral-xyz/anchor/issues/3209
@@ -58,7 +82,7 @@ pub struct CreateCurveCtx<'info> {
         init,
         signer,
         payer = creator,
-        mint::decimals = config.load()?.token_decimal,
+        mint::decimals = config.load()?.base_decimal,
         mint::authority = curve_authority,
         mint::token_program = token_program,
     )]
@@ -135,30 +159,17 @@ pub fn handle_create_curve_spl_token(
     params: CreateCurveParams,
 ) -> Result<()> {
     let config = ctx.accounts.config.load()?;
-    let initial_base_supply = TOKEN_TOTAL_SUPPLY; // TODO: make this configurable
+    let initial_base_supply = TOKEN_TOTAL_SUPPLY;
 
-    let token_type_value =
-        TokenType::try_from(config.token_type).map_err(|_| AmmError::InvalidTokenType)?;
+    let token_type =
+        TokenType::try_from(config.base_token_flag).map_err(|_| AmmError::InvalidTokenType)?;
     require!(
-        token_type_value == TokenType::SplToken,
+        token_type == TokenType::SplToken,
         AmmError::InvalidTokenType
     );
 
-    let CreateCurveParams { name, symbol, uri } = params;
-
     // Validate input parameters
-    require!(
-        name.len() <= MAX_NAME_LENGTH && !name.is_empty(),
-        AmmError::InvalidTokenName
-    );
-    require!(
-        symbol.len() <= MAX_SYMBOL_LENGTH && !symbol.is_empty(),
-        AmmError::InvalidTokenSymbol
-    );
-    require!(
-        uri.len() <= MAX_URI_LENGTH && !uri.is_empty(),
-        AmmError::InvalidTokenUri
-    );
+    params.validate()?;
 
     // don't run this yet
     // Validate vanity address ends with "kfun"
@@ -177,9 +188,9 @@ pub fn handle_create_curve_spl_token(
         metadata_program: ctx.accounts.metadata_program.to_account_info(),
         mint_metadata: ctx.accounts.metadata.to_account_info(),
         creator: ctx.accounts.creator.to_account_info(),
-        name: &name,
-        symbol: &symbol,
-        uri: &uri,
+        name: &params.name,
+        symbol: &params.symbol,
+        uri: &params.uri,
         curve_authority_bump: const_pda::curve_authority::BUMP,
         partner: config.fee_claimer,
     })?;
@@ -213,6 +224,11 @@ pub fn handle_create_curve_spl_token(
         None,
     )?;
 
+    let initial_price = get_price(
+        config.initial_virtual_quote_reserve as u128,
+        config.initial_virtual_base_reserve as u128,
+    )?;
+
     // init curve
     let mut curve = ctx.accounts.curve.load_init()?;
 
@@ -222,9 +238,12 @@ pub fn handle_create_curve_spl_token(
         ctx.accounts.base_mint.key(),
         ctx.accounts.base_vault.key(),
         ctx.accounts.quote_vault.key(),
-        config.initial_sqrt_price,
+        initial_price,
         CurveType::SplToken.into(),
+        params.fee_type,
         initial_base_supply,
+        config.initial_virtual_quote_reserve,
+        config.initial_virtual_base_reserve,
     );
 
     emit_cpi!(EvtInitializeCurve {

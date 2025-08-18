@@ -11,15 +11,11 @@ import {
   fixDecoderSize,
   fixEncoderSize,
   getAddressEncoder,
-  getArrayDecoder,
-  getArrayEncoder,
   getBytesDecoder,
   getBytesEncoder,
   getProgramDerivedAddress,
   getStructDecoder,
   getStructEncoder,
-  getU128Decoder,
-  getU128Encoder,
   getU16Decoder,
   getU16Encoder,
   getU64Decoder,
@@ -30,9 +26,9 @@ import {
   type AccountMeta,
   type AccountSignerMeta,
   type Address,
-  type Codec,
-  type Decoder,
-  type Encoder,
+  type FixedSizeCodec,
+  type FixedSizeDecoder,
+  type FixedSizeEncoder,
   type Instruction,
   type InstructionWithAccounts,
   type InstructionWithData,
@@ -48,16 +44,6 @@ import {
   getAccountMetaFactory,
   type ResolvedAccount,
 } from '../shared';
-import {
-  getLiquidityDistributionParametersDecoder,
-  getLiquidityDistributionParametersEncoder,
-  getLockedVestingParamsDecoder,
-  getLockedVestingParamsEncoder,
-  type LiquidityDistributionParameters,
-  type LiquidityDistributionParametersArgs,
-  type LockedVestingParams,
-  type LockedVestingParamsArgs,
-} from '../types';
 
 export const CREATE_CONFIG_DISCRIMINATOR = new Uint8Array([
   201, 207, 243, 114, 75, 111, 47, 189,
@@ -131,9 +117,9 @@ export type CreateConfigInstruction<
 export type CreateConfigInstructionData = {
   discriminator: ReadonlyUint8Array;
   /** token type (0 | 1), 0: SPL Token, 1: Token2022 */
-  tokenType: number;
+  baseTokenFlag: number;
   /** token decimal, (6 | 9) */
-  tokenDecimal: number;
+  baseDecimal: number;
   /** Trading fee in bps */
   feeBasisPoints: number;
   /** Level 1 referral fee in bps */
@@ -144,21 +130,27 @@ export type CreateConfigInstructionData = {
   l3ReferralFeeBasisPoints: number;
   /** Referee discount in bps */
   refereeDiscountBasisPoints: number;
-  /** creator fee in bps */
+  /** creator/project fee in bps */
   creatorFeeBasisPoints: number;
+  /** meme/community fee in bps */
+  memeFeeBasisPoints: number;
   /** migration fee in bps (quote token fee) */
   migrationFeeBasisPoints: number;
-  lockedVesting: LockedVestingParams;
-  initialSqrtPrice: bigint;
+  /** migration base threshold (the amount of token to migrate) */
+  migrationBaseThreshold: bigint;
+  /** migration quote threshold */
   migrationQuoteThreshold: bigint;
-  curve: Array<LiquidityDistributionParameters>;
+  /** initial virtual quote reserve to boost the initial liquidity */
+  initialVirtualQuoteReserve: bigint;
+  /** initial virtual base reserve to boost the initial liquidity */
+  initialVirtualBaseReserve: bigint;
 };
 
 export type CreateConfigInstructionDataArgs = {
   /** token type (0 | 1), 0: SPL Token, 1: Token2022 */
-  tokenType: number;
+  baseTokenFlag: number;
   /** token decimal, (6 | 9) */
-  tokenDecimal: number;
+  baseDecimal: number;
   /** Trading fee in bps */
   feeBasisPoints: number;
   /** Level 1 referral fee in bps */
@@ -169,58 +161,66 @@ export type CreateConfigInstructionDataArgs = {
   l3ReferralFeeBasisPoints: number;
   /** Referee discount in bps */
   refereeDiscountBasisPoints: number;
-  /** creator fee in bps */
+  /** creator/project fee in bps */
   creatorFeeBasisPoints: number;
+  /** meme/community fee in bps */
+  memeFeeBasisPoints: number;
   /** migration fee in bps (quote token fee) */
   migrationFeeBasisPoints: number;
-  lockedVesting: LockedVestingParamsArgs;
-  initialSqrtPrice: number | bigint;
+  /** migration base threshold (the amount of token to migrate) */
+  migrationBaseThreshold: number | bigint;
+  /** migration quote threshold */
   migrationQuoteThreshold: number | bigint;
-  curve: Array<LiquidityDistributionParametersArgs>;
+  /** initial virtual quote reserve to boost the initial liquidity */
+  initialVirtualQuoteReserve: number | bigint;
+  /** initial virtual base reserve to boost the initial liquidity */
+  initialVirtualBaseReserve: number | bigint;
 };
 
-export function getCreateConfigInstructionDataEncoder(): Encoder<CreateConfigInstructionDataArgs> {
+export function getCreateConfigInstructionDataEncoder(): FixedSizeEncoder<CreateConfigInstructionDataArgs> {
   return transformEncoder(
     getStructEncoder([
       ['discriminator', fixEncoderSize(getBytesEncoder(), 8)],
-      ['tokenType', getU8Encoder()],
-      ['tokenDecimal', getU8Encoder()],
+      ['baseTokenFlag', getU8Encoder()],
+      ['baseDecimal', getU8Encoder()],
       ['feeBasisPoints', getU16Encoder()],
       ['l1ReferralFeeBasisPoints', getU16Encoder()],
       ['l2ReferralFeeBasisPoints', getU16Encoder()],
       ['l3ReferralFeeBasisPoints', getU16Encoder()],
       ['refereeDiscountBasisPoints', getU16Encoder()],
       ['creatorFeeBasisPoints', getU16Encoder()],
+      ['memeFeeBasisPoints', getU16Encoder()],
       ['migrationFeeBasisPoints', getU16Encoder()],
-      ['lockedVesting', getLockedVestingParamsEncoder()],
-      ['initialSqrtPrice', getU128Encoder()],
+      ['migrationBaseThreshold', getU64Encoder()],
       ['migrationQuoteThreshold', getU64Encoder()],
-      ['curve', getArrayEncoder(getLiquidityDistributionParametersEncoder())],
+      ['initialVirtualQuoteReserve', getU64Encoder()],
+      ['initialVirtualBaseReserve', getU64Encoder()],
     ]),
     (value) => ({ ...value, discriminator: CREATE_CONFIG_DISCRIMINATOR })
   );
 }
 
-export function getCreateConfigInstructionDataDecoder(): Decoder<CreateConfigInstructionData> {
+export function getCreateConfigInstructionDataDecoder(): FixedSizeDecoder<CreateConfigInstructionData> {
   return getStructDecoder([
     ['discriminator', fixDecoderSize(getBytesDecoder(), 8)],
-    ['tokenType', getU8Decoder()],
-    ['tokenDecimal', getU8Decoder()],
+    ['baseTokenFlag', getU8Decoder()],
+    ['baseDecimal', getU8Decoder()],
     ['feeBasisPoints', getU16Decoder()],
     ['l1ReferralFeeBasisPoints', getU16Decoder()],
     ['l2ReferralFeeBasisPoints', getU16Decoder()],
     ['l3ReferralFeeBasisPoints', getU16Decoder()],
     ['refereeDiscountBasisPoints', getU16Decoder()],
     ['creatorFeeBasisPoints', getU16Decoder()],
+    ['memeFeeBasisPoints', getU16Decoder()],
     ['migrationFeeBasisPoints', getU16Decoder()],
-    ['lockedVesting', getLockedVestingParamsDecoder()],
-    ['initialSqrtPrice', getU128Decoder()],
+    ['migrationBaseThreshold', getU64Decoder()],
     ['migrationQuoteThreshold', getU64Decoder()],
-    ['curve', getArrayDecoder(getLiquidityDistributionParametersDecoder())],
+    ['initialVirtualQuoteReserve', getU64Decoder()],
+    ['initialVirtualBaseReserve', getU64Decoder()],
   ]);
 }
 
-export function getCreateConfigInstructionDataCodec(): Codec<
+export function getCreateConfigInstructionDataCodec(): FixedSizeCodec<
   CreateConfigInstructionDataArgs,
   CreateConfigInstructionData
 > {
@@ -257,19 +257,20 @@ export type CreateConfigAsyncInput<
   systemProgram?: Address<TAccountSystemProgram>;
   eventAuthority?: Address<TAccountEventAuthority>;
   program: Address<TAccountProgram>;
-  tokenType: CreateConfigInstructionDataArgs['tokenType'];
-  tokenDecimal: CreateConfigInstructionDataArgs['tokenDecimal'];
+  baseTokenFlag: CreateConfigInstructionDataArgs['baseTokenFlag'];
+  baseDecimal: CreateConfigInstructionDataArgs['baseDecimal'];
   feeBasisPoints: CreateConfigInstructionDataArgs['feeBasisPoints'];
   l1ReferralFeeBasisPoints: CreateConfigInstructionDataArgs['l1ReferralFeeBasisPoints'];
   l2ReferralFeeBasisPoints: CreateConfigInstructionDataArgs['l2ReferralFeeBasisPoints'];
   l3ReferralFeeBasisPoints: CreateConfigInstructionDataArgs['l3ReferralFeeBasisPoints'];
   refereeDiscountBasisPoints: CreateConfigInstructionDataArgs['refereeDiscountBasisPoints'];
   creatorFeeBasisPoints: CreateConfigInstructionDataArgs['creatorFeeBasisPoints'];
+  memeFeeBasisPoints: CreateConfigInstructionDataArgs['memeFeeBasisPoints'];
   migrationFeeBasisPoints: CreateConfigInstructionDataArgs['migrationFeeBasisPoints'];
-  lockedVesting: CreateConfigInstructionDataArgs['lockedVesting'];
-  initialSqrtPrice: CreateConfigInstructionDataArgs['initialSqrtPrice'];
+  migrationBaseThreshold: CreateConfigInstructionDataArgs['migrationBaseThreshold'];
   migrationQuoteThreshold: CreateConfigInstructionDataArgs['migrationQuoteThreshold'];
-  curve: CreateConfigInstructionDataArgs['curve'];
+  initialVirtualQuoteReserve: CreateConfigInstructionDataArgs['initialVirtualQuoteReserve'];
+  initialVirtualBaseReserve: CreateConfigInstructionDataArgs['initialVirtualBaseReserve'];
 };
 
 export async function getCreateConfigInstructionAsync<
@@ -443,19 +444,20 @@ export type CreateConfigInput<
   systemProgram?: Address<TAccountSystemProgram>;
   eventAuthority: Address<TAccountEventAuthority>;
   program: Address<TAccountProgram>;
-  tokenType: CreateConfigInstructionDataArgs['tokenType'];
-  tokenDecimal: CreateConfigInstructionDataArgs['tokenDecimal'];
+  baseTokenFlag: CreateConfigInstructionDataArgs['baseTokenFlag'];
+  baseDecimal: CreateConfigInstructionDataArgs['baseDecimal'];
   feeBasisPoints: CreateConfigInstructionDataArgs['feeBasisPoints'];
   l1ReferralFeeBasisPoints: CreateConfigInstructionDataArgs['l1ReferralFeeBasisPoints'];
   l2ReferralFeeBasisPoints: CreateConfigInstructionDataArgs['l2ReferralFeeBasisPoints'];
   l3ReferralFeeBasisPoints: CreateConfigInstructionDataArgs['l3ReferralFeeBasisPoints'];
   refereeDiscountBasisPoints: CreateConfigInstructionDataArgs['refereeDiscountBasisPoints'];
   creatorFeeBasisPoints: CreateConfigInstructionDataArgs['creatorFeeBasisPoints'];
+  memeFeeBasisPoints: CreateConfigInstructionDataArgs['memeFeeBasisPoints'];
   migrationFeeBasisPoints: CreateConfigInstructionDataArgs['migrationFeeBasisPoints'];
-  lockedVesting: CreateConfigInstructionDataArgs['lockedVesting'];
-  initialSqrtPrice: CreateConfigInstructionDataArgs['initialSqrtPrice'];
+  migrationBaseThreshold: CreateConfigInstructionDataArgs['migrationBaseThreshold'];
   migrationQuoteThreshold: CreateConfigInstructionDataArgs['migrationQuoteThreshold'];
-  curve: CreateConfigInstructionDataArgs['curve'];
+  initialVirtualQuoteReserve: CreateConfigInstructionDataArgs['initialVirtualQuoteReserve'];
+  initialVirtualBaseReserve: CreateConfigInstructionDataArgs['initialVirtualBaseReserve'];
 };
 
 export function getCreateConfigInstruction<

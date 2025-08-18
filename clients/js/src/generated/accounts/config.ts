@@ -23,8 +23,6 @@ import {
   getBytesEncoder,
   getStructDecoder,
   getStructEncoder,
-  getU128Decoder,
-  getU128Encoder,
   getU16Decoder,
   getU16Encoder,
   getU64Decoder,
@@ -44,16 +42,6 @@ import {
   type MaybeEncodedAccount,
   type ReadonlyUint8Array,
 } from '@solana/kit';
-import {
-  getLiquidityDistributionConfigDecoder,
-  getLiquidityDistributionConfigEncoder,
-  getLockedVestingConfigDecoder,
-  getLockedVestingConfigEncoder,
-  type LiquidityDistributionConfig,
-  type LiquidityDistributionConfigArgs,
-  type LockedVestingConfig,
-  type LockedVestingConfigArgs,
-} from '../types';
 
 export const CONFIG_DISCRIMINATOR = new Uint8Array([
   155, 12, 170, 224, 30, 250, 204, 130,
@@ -69,12 +57,14 @@ export type Config = {
   quoteMint: Address;
   /** fee claimer */
   feeClaimer: Address;
-  /** token type (0 | 1), 0: SPL Token, 1: Token2022 */
-  tokenType: number;
-  /** quote token flag (either SPL Token or Token2022) */
+  /** base token flag (0 | 1), 0: SPL Token, 1: Token2022 */
+  baseTokenFlag: number;
+  /** quote token flag (0 | 1), 0: SPL Token, 1: Token2022 */
   quoteTokenFlag: number;
-  /** token decimal, (6 | 9) */
-  tokenDecimal: number;
+  /** base token decimal, (6 | 9) */
+  baseDecimal: number;
+  /** quote token decimal, (6 | 9) */
+  quoteDecimal: number;
   /** padding 1 */
   padding1: ReadonlyUint8Array;
   /** Trading fee in bps */
@@ -87,25 +77,21 @@ export type Config = {
   l3ReferralFeeBasisPoints: number;
   /** Referee discount fee in bps (if the user has a referral, they will get this discount) */
   refereeDiscountBasisPoints: number;
-  /** creator fee in bps */
+  /** creator/project fee in bps */
   creatorFeeBasisPoints: number;
+  /** meme/community fee in bps */
+  memeFeeBasisPoints: number;
   /** migration fee in bps (quote token fee) */
   migrationFeeBasisPoints: number;
-  padding2: ReadonlyUint8Array;
-  /** total amount of quote token raised for migration */
-  migrationQuoteThreshold: bigint;
-  /** migration base threshold (in base token) */
+  /** migration base threshold (the amount of token to migrate) */
   migrationBaseThreshold: bigint;
-  /** base token amount to sell before migration */
-  swapBaseAmount: bigint;
-  /** initial sqrt price, the minimum price */
-  initialSqrtPrice: bigint;
-  /** migration sqrt price, once we reach this price, we will migrate */
-  migrationSqrtPrice: bigint;
-  /** locked vesting config */
-  lockedVestingConfig: LockedVestingConfig;
-  /** curve, only use 4 points firstly, we can extend that later */
-  curve: Array<LiquidityDistributionConfig>;
+  /** migration quote threshold */
+  migrationQuoteThreshold: bigint;
+  /** initial virtual quote reserve to boost the initial liquidity */
+  initialVirtualQuoteReserve: bigint;
+  /** initial virtual base reserve to boost the initial liquidity */
+  initialVirtualBaseReserve: bigint;
+  padding2: Array<bigint>;
 };
 
 export type ConfigArgs = {
@@ -113,12 +99,14 @@ export type ConfigArgs = {
   quoteMint: Address;
   /** fee claimer */
   feeClaimer: Address;
-  /** token type (0 | 1), 0: SPL Token, 1: Token2022 */
-  tokenType: number;
-  /** quote token flag (either SPL Token or Token2022) */
+  /** base token flag (0 | 1), 0: SPL Token, 1: Token2022 */
+  baseTokenFlag: number;
+  /** quote token flag (0 | 1), 0: SPL Token, 1: Token2022 */
   quoteTokenFlag: number;
-  /** token decimal, (6 | 9) */
-  tokenDecimal: number;
+  /** base token decimal, (6 | 9) */
+  baseDecimal: number;
+  /** quote token decimal, (6 | 9) */
+  quoteDecimal: number;
   /** padding 1 */
   padding1: ReadonlyUint8Array;
   /** Trading fee in bps */
@@ -131,25 +119,21 @@ export type ConfigArgs = {
   l3ReferralFeeBasisPoints: number;
   /** Referee discount fee in bps (if the user has a referral, they will get this discount) */
   refereeDiscountBasisPoints: number;
-  /** creator fee in bps */
+  /** creator/project fee in bps */
   creatorFeeBasisPoints: number;
+  /** meme/community fee in bps */
+  memeFeeBasisPoints: number;
   /** migration fee in bps (quote token fee) */
   migrationFeeBasisPoints: number;
-  padding2: ReadonlyUint8Array;
-  /** total amount of quote token raised for migration */
-  migrationQuoteThreshold: number | bigint;
-  /** migration base threshold (in base token) */
+  /** migration base threshold (the amount of token to migrate) */
   migrationBaseThreshold: number | bigint;
-  /** base token amount to sell before migration */
-  swapBaseAmount: number | bigint;
-  /** initial sqrt price, the minimum price */
-  initialSqrtPrice: number | bigint;
-  /** migration sqrt price, once we reach this price, we will migrate */
-  migrationSqrtPrice: number | bigint;
-  /** locked vesting config */
-  lockedVestingConfig: LockedVestingConfigArgs;
-  /** curve, only use 4 points firstly, we can extend that later */
-  curve: Array<LiquidityDistributionConfigArgs>;
+  /** migration quote threshold */
+  migrationQuoteThreshold: number | bigint;
+  /** initial virtual quote reserve to boost the initial liquidity */
+  initialVirtualQuoteReserve: number | bigint;
+  /** initial virtual base reserve to boost the initial liquidity */
+  initialVirtualBaseReserve: number | bigint;
+  padding2: Array<number | bigint>;
 };
 
 export function getConfigEncoder(): FixedSizeEncoder<ConfigArgs> {
@@ -158,28 +142,24 @@ export function getConfigEncoder(): FixedSizeEncoder<ConfigArgs> {
       ['discriminator', fixEncoderSize(getBytesEncoder(), 8)],
       ['quoteMint', getAddressEncoder()],
       ['feeClaimer', getAddressEncoder()],
-      ['tokenType', getU8Encoder()],
+      ['baseTokenFlag', getU8Encoder()],
       ['quoteTokenFlag', getU8Encoder()],
-      ['tokenDecimal', getU8Encoder()],
-      ['padding1', fixEncoderSize(getBytesEncoder(), 5)],
+      ['baseDecimal', getU8Encoder()],
+      ['quoteDecimal', getU8Encoder()],
+      ['padding1', fixEncoderSize(getBytesEncoder(), 4)],
       ['feeBasisPoints', getU16Encoder()],
       ['l1ReferralFeeBasisPoints', getU16Encoder()],
       ['l2ReferralFeeBasisPoints', getU16Encoder()],
       ['l3ReferralFeeBasisPoints', getU16Encoder()],
       ['refereeDiscountBasisPoints', getU16Encoder()],
       ['creatorFeeBasisPoints', getU16Encoder()],
+      ['memeFeeBasisPoints', getU16Encoder()],
       ['migrationFeeBasisPoints', getU16Encoder()],
-      ['padding2', fixEncoderSize(getBytesEncoder(), 2)],
-      ['migrationQuoteThreshold', getU64Encoder()],
       ['migrationBaseThreshold', getU64Encoder()],
-      ['swapBaseAmount', getU64Encoder()],
-      ['initialSqrtPrice', getU128Encoder()],
-      ['migrationSqrtPrice', getU128Encoder()],
-      ['lockedVestingConfig', getLockedVestingConfigEncoder()],
-      [
-        'curve',
-        getArrayEncoder(getLiquidityDistributionConfigEncoder(), { size: 4 }),
-      ],
+      ['migrationQuoteThreshold', getU64Encoder()],
+      ['initialVirtualQuoteReserve', getU64Encoder()],
+      ['initialVirtualBaseReserve', getU64Encoder()],
+      ['padding2', getArrayEncoder(getU64Encoder(), { size: 4 })],
     ]),
     (value) => ({ ...value, discriminator: CONFIG_DISCRIMINATOR })
   );
@@ -190,28 +170,24 @@ export function getConfigDecoder(): FixedSizeDecoder<Config> {
     ['discriminator', fixDecoderSize(getBytesDecoder(), 8)],
     ['quoteMint', getAddressDecoder()],
     ['feeClaimer', getAddressDecoder()],
-    ['tokenType', getU8Decoder()],
+    ['baseTokenFlag', getU8Decoder()],
     ['quoteTokenFlag', getU8Decoder()],
-    ['tokenDecimal', getU8Decoder()],
-    ['padding1', fixDecoderSize(getBytesDecoder(), 5)],
+    ['baseDecimal', getU8Decoder()],
+    ['quoteDecimal', getU8Decoder()],
+    ['padding1', fixDecoderSize(getBytesDecoder(), 4)],
     ['feeBasisPoints', getU16Decoder()],
     ['l1ReferralFeeBasisPoints', getU16Decoder()],
     ['l2ReferralFeeBasisPoints', getU16Decoder()],
     ['l3ReferralFeeBasisPoints', getU16Decoder()],
     ['refereeDiscountBasisPoints', getU16Decoder()],
     ['creatorFeeBasisPoints', getU16Decoder()],
+    ['memeFeeBasisPoints', getU16Decoder()],
     ['migrationFeeBasisPoints', getU16Decoder()],
-    ['padding2', fixDecoderSize(getBytesDecoder(), 2)],
-    ['migrationQuoteThreshold', getU64Decoder()],
     ['migrationBaseThreshold', getU64Decoder()],
-    ['swapBaseAmount', getU64Decoder()],
-    ['initialSqrtPrice', getU128Decoder()],
-    ['migrationSqrtPrice', getU128Decoder()],
-    ['lockedVestingConfig', getLockedVestingConfigDecoder()],
-    [
-      'curve',
-      getArrayDecoder(getLiquidityDistributionConfigDecoder(), { size: 4 }),
-    ],
+    ['migrationQuoteThreshold', getU64Decoder()],
+    ['initialVirtualQuoteReserve', getU64Decoder()],
+    ['initialVirtualBaseReserve', getU64Decoder()],
+    ['padding2', getArrayDecoder(getU64Decoder(), { size: 4 })],
   ]);
 }
 
@@ -273,5 +249,5 @@ export async function fetchAllMaybeConfig(
 }
 
 export function getConfigSize(): number {
-  return 328;
+  return 160;
 }

@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js'
 import type { CreateConfigInstructionDataArgs } from '~/clients'
 import { MIGRATION_FEE_BASIS_POINTS, TOKEN_DECIMALS } from './constants.ts'
+import {LAMPORTS_PER_SOL} from "gill";
 
 export const RESOLUTION = 64
 
@@ -104,40 +105,6 @@ export const getTotalVestingAmount = (lockedVesting: ReturnType<typeof getLocked
 }
 
 /**
- * Get the percentage of supply that should be allocated to initial liquidity
- * @param initialMarketCap - The initial market cap
- * @param migrationMarketCap - The migration market cap
- * @param lockedVesting - The locked vesting
- * @param totalTokenSupply - The total token supply
- * @returns The percentage of supply for initial liquidity
- */
-export const getPercentageSupplyOnMigration = (
-  initialMarketCap: Decimal,
-  migrationMarketCap: Decimal,
-  lockedVesting: ReturnType<typeof getLockedVestingParams>,
-  totalTokenSupply: bigint,
-): number => {
-  // formula: x = sqrt(initialMC / migrationMC) * (100 - lockedVesting - leftover) / (1 + sqrt(initialMC / migrationMC))
-
-  // sqrtRatio = sqrt(initial_MC / migration_MC)
-  const marketCapRatio = initialMarketCap.div(migrationMarketCap)
-  const sqrtRatio = Decimal.sqrt(marketCapRatio)
-
-  // locked vesting percentage
-  const totalVestingAmount = getTotalVestingAmount(lockedVesting)
-  const vestingPercentage = new Decimal(totalVestingAmount.toString())
-    .mul(new Decimal(100))
-    .div(new Decimal(totalTokenSupply.toString()))
-
-  // (100 * sqrtRatio - (vestingPercentage + leftoverPercentage) * sqrtRatio) / (1 + sqrtRatio)
-  const numerator = new Decimal(100)
-    .mul(sqrtRatio)
-    .sub(vestingPercentage.add(MIGRATION_FEE_BASIS_POINTS).mul(sqrtRatio))
-  const denominator = new Decimal(1).add(sqrtRatio)
-  return numerator.div(denominator).toNumber()
-}
-
-/**
  * Get the migration quote amount
  * @param migrationMarketCap - The migration market cap
  * @param percentageSupplyOnMigration - The percentage of supply on migration
@@ -222,6 +189,8 @@ export const getLiquidity = ({
 }): bigint => {
   const liquidityFromBase = getInitialLiquidityFromDeltaBase(baseAmount, maxSqrtPrice, minSqrtPrice)
   const liquidityFromQuote = getInitialLiquidityFromDeltaQuote(quoteAmount, minSqrtPrice, maxSqrtPrice)
+  console.log('Liquidity from Base:', liquidityFromBase.toString())
+  console.log('Liquidity from Quote:', liquidityFromQuote.toString())
   return liquidityFromBase < liquidityFromQuote ? liquidityFromBase : liquidityFromQuote
 }
 
@@ -250,7 +219,7 @@ export const getFirstCurve = ({
   const migrationSqrPriceDecimal = new Decimal(migrationSqrtPrice)
   const migrationBaseAmountDecimal = new Decimal(migrationBaseAmount)
   const swapAmountDecimal = new Decimal(swapAmount)
-  const migrationFeePercentDecimal = new Decimal(MIGRATION_FEE_BASIS_POINTS)
+  const migrationFeePercentDecimal = new Decimal(5)
   // From (1) and (2) => Quote_amount / Swap_amount = (Pmax * Pmin)               (4)
   // From (3) and (4) => Swap_amount * (1-migrationFeePercent/100) / Migration_amount = Pmax / Pmin
   // => Pmin = Pmax * Migration_amount / (Swap_amount * (1-migrationFeePercent/100))
@@ -279,52 +248,6 @@ export const getFirstCurve = ({
   }
 }
 
-import BN from 'bn.js'
-/**
- * Get the first curve
- * @param migrationSqrPrice - The migration sqrt price
- * @param migrationAmount - The migration amount
- * @param swapAmount - The swap amount
- * @param migrationQuoteThreshold - The migration quote threshold
- * @param migrationFeePercent - The migration fee percent
- * @returns The first curve
- */
-export const getFirstCurveOld = (
-  migrationSqrtPrice: BN,
-  migrationBaseAmount: BN,
-  swapAmount: BN,
-  migrationQuoteThreshold: BN,
-  migrationFeePercent: number
-) => {
-  // Swap_amount = L *(1/Pmin - 1/Pmax) = L * (Pmax - Pmin) / (Pmax * Pmin)       (1)
-  // Quote_amount = L * (Pmax - Pmin)                                             (2)
-  // (Quote_amount * (1-migrationFeePercent/100) / Migration_amount = Pmax ^ 2    (3)
-  const migrationSqrPriceDecimal = new Decimal(migrationSqrtPrice.toString())
-  const migrationBaseAmountDecimal = new Decimal(
-    migrationBaseAmount.toString()
-  )
-  const swapAmountDecimal = new Decimal(swapAmount.toString())
-  const migrationFeePercentDecimal = new Decimal(
-    migrationFeePercent.toString()
-  )
-  // From (1) and (2) => Quote_amount / Swap_amount = (Pmax * Pmin)               (4)
-  // From (3) and (4) => Swap_amount * (1-migrationFeePercent/100) / Migration_amount = Pmax / Pmin
-  // => Pmin = Pmax * Migration_amount / (Swap_amount * (1-migrationFeePercent/100))
-  const denominator = swapAmountDecimal
-    .mul(new Decimal(100).sub(migrationFeePercentDecimal))
-    .div(new Decimal(100))
-
-  const sqrtStartPriceDecimal = migrationSqrPriceDecimal
-    .mul(migrationBaseAmountDecimal)
-    .div(denominator)
-
-  const sqrtStartPrice = new BN(sqrtStartPriceDecimal.floor().toFixed())
-  return {
-    sqrtStartPrice,
-  }
-}
-
-
 /**
  * Get the sqrt price from the price
  * @param price - The price
@@ -341,30 +264,6 @@ export const getSqrtPriceFromPrice = (price: string, tokenADecimal: number, toke
 
   return BigInt(sqrtValueQ64.floor().toFixed())
 }
-
-/**
- * Get the sqrt price from the price
- * @param price - The price
- * @param tokenADecimal - The decimal of token A
- * @param tokenBDecimal - The decimal of token B
- * @returns The sqrt price
- * price = (sqrtPrice >> 64)^2 * 10^(tokenADecimal - tokenBDecimal)
- */
-export const getSqrtPriceFromPriceOld = (
-  price: string,
-  tokenADecimal: number,
-  tokenBDecimal: number
-): BN => {
-  const decimalPrice = new Decimal(price)
-  const adjustedByDecimals = decimalPrice.div(
-    new Decimal(10 ** (tokenADecimal - tokenBDecimal))
-  )
-  const sqrtValue = Decimal.sqrt(adjustedByDecimals)
-  const sqrtValueQ64 = sqrtValue.mul(Decimal.pow(2, 64))
-
-  return new BN(sqrtValueQ64.floor().toFixed())
-}
-
 
 /**
  * Build a custom constant product curve by market cap
@@ -384,40 +283,29 @@ export function buildCurveWithMarketCap(config: {
     migrationFeeBasisPoints: number
   }
 
-  lockedVestingConfig: LockedVestingParams
   initialMarketCap: bigint
   migrationMarketCap: bigint
 }): CreateConfigInstructionDataArgs {
   const tokenDecimal = config.tokenBaseDecimal ?? 6
-  const lockedVesting = getLockedVestingParams(config.lockedVestingConfig, tokenDecimal)
 
   const totalSupplyLamports = convertToLamports(config.totalTokenSupply, tokenDecimal)
-
-  const percentageSupplyOnMigration = getPercentageSupplyOnMigration(
-    new Decimal(config.initialMarketCap.toString()),
-    new Decimal(config.migrationMarketCap.toString()),
-    lockedVesting,
-    totalSupplyLamports,
-  )
 
   // Migration quote amount (in quote currency units)
   const migrationQuoteAmount = getMigrationQuoteAmount(
     new Decimal(config.migrationMarketCap.toString()),
-    new Decimal(percentageSupplyOnMigration),
+    new Decimal(20),
   )
 
-  console.log('Migration Quote Amount:', migrationQuoteAmount.toString())
+  console.log('Migration Quote Amount:', migrationQuoteAmount.div(LAMPORTS_PER_SOL).toString())
 
   // Migration base amount in token lamports
   const migrationBaseAmountLamports = new Decimal(totalSupplyLamports.toString())
-    .mul(new Decimal(percentageSupplyOnMigration))
+    .mul(new Decimal(20))
     .div(new Decimal(100))
 
   // Migration base amount in tokens (not lamports)
   const migrationBaseAmountTokens = migrationBaseAmountLamports.div(new Decimal(10).pow(tokenDecimal))
 
-  // Price: quote per token
-  const migrationPrice = migrationQuoteAmount.div(migrationBaseAmountTokens)
 
   const migrationQuoteThreshold = BigInt(
     getMigrationQuoteThresholdFromMigrationQuoteAmount(migrationQuoteAmount, MIGRATION_FEE_BASIS_POINTS)
@@ -425,18 +313,13 @@ export function buildCurveWithMarketCap(config: {
       .toString(),
   )
 
+  // Price: quote per token
+  const migrationPrice = migrationQuoteAmount.div(migrationBaseAmountTokens)
   const migrationSqrtPrice = getSqrtPriceFromPrice(migrationPrice.toString(), tokenDecimal, TOKEN_DECIMALS)
-  const migrationSqrtPriceOld = getSqrtPriceFromPriceOld(
-    migrationPrice.toString(),
-    tokenDecimal,
-    TOKEN_DECIMALS,
-  )
   console.log('Migration Sqrt Price:', migrationSqrtPrice.toString())
-  console.log('Migration Sqrt   Old:', migrationSqrtPriceOld.toString())
-  const totalVestingAmount = getTotalVestingAmount(lockedVesting)
 
   // swapAmount is in token lamports (the amount available for swapping)
-  const swapAmount = totalSupplyLamports - BigInt(migrationBaseAmountLamports.floor().toString()) - totalVestingAmount
+  const swapAmount = totalSupplyLamports - BigInt(migrationBaseAmountLamports.floor().toString())
 
   const { initialSqrtPrice, curve } = getFirstCurve({
     migrationSqrtPrice,
@@ -445,14 +328,6 @@ export function buildCurveWithMarketCap(config: {
     migrationQuoteThreshold,
   })
   console.log('Initial Sqrt Price:', initialSqrtPrice.toString())
-  const { sqrtStartPrice: legacySqrtStartPrice } = getFirstCurveOld(
-    new BN(migrationSqrtPrice.toString()),
-    new BN(migrationBaseAmountLamports.toString()),
-    new BN(swapAmount.toString()),
-    new BN(migrationQuoteThreshold.toString()),
-    MIGRATION_FEE_BASIS_POINTS,
-  )
-  console.log('Legacy Sqrt Start Price:', legacySqrtStartPrice.toString())
 
   // console.table({
   //   totalSupply: totalSupplyLamports.toString(),
@@ -480,7 +355,6 @@ export function buildCurveWithMarketCap(config: {
     refereeDiscountBasisPoints: config.feeConfig.refereeDiscountBasisPoints,
     creatorFeeBasisPoints: config.feeConfig.creatorFeeBasisPoints,
     migrationFeeBasisPoints: config.feeConfig.migrationFeeBasisPoints,
-    lockedVesting: lockedVesting,
     initialSqrtPrice,
     migrationQuoteThreshold,
     curve,

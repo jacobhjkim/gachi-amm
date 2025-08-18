@@ -94,22 +94,26 @@ pub enum AmmError {
     #[msg("Invalid creator trading fee percentage")]
     InvalidCreatorTradingFeePercentage,
 
-    #[msg("Invalid vesting parameters")]
-    InvalidVestingParameters,
-
-    // Permission errors
+    /// Permission errors
     #[msg("Not permit to do this action")]
     NotPermitToDoThisAction,
 
-    // Migration specific errors
+    /// Migration specific errors
     #[msg("Missing pool config in remaining account")]
     MissingPoolConfigInRemainingAccount,
 
-    // Token 2022 specific errors
+    /// Token 2022 specific errors
     #[msg("Unsupport native mint token 2022")]
     UnsupportNativeMintToken2022,
 
-    // Claim errors
+    /// Claim errors
     #[msg("Nothing to claim")]
     NothingToClaim,
+
+    /// Invalid fee_type, only supports 0, 1, and 2.
+    #[msg("Invalid fee type")]
+    InvalidFeeType,
+
+    #[msg("setting the same fee type")]
+    FeeTypeAlreadySet,
 }

@@ -34,3 +34,13 @@ bun test
 - graduation logic is fucked
 - re-read buy/sell helpers and logic
 - fix swap.test.ts
+
+
+## Deploy cost calculation
+```shell
+du -k target/deploy/amm.so | awk '{print $1 * 1024}'
+765952
+
+solana rent 765952
+Rent-exempt minimum: 5.3319168 SOL
+```

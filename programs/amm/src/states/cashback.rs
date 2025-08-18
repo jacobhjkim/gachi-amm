@@ -26,7 +26,7 @@ pub enum CashbackTier {
 
 impl CashbackTier {
     /// Get the cashback basis points for this tier
-    pub fn get_cashback_bps(&self) -> u64 {
+    pub fn get_cashback_bps(&self) -> u16 {
         match self {
             CashbackTier::Wood => CASHBACK_WOOD_BPS,
             CashbackTier::Bronze => CASHBACK_BRONZE_BPS,

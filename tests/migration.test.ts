@@ -34,17 +34,20 @@ describe('Migration Test', () => {
       tradeDirection: TradeDirection.QuoteToBase,
     })
 
-    const [finalCurveState, configState] = await Promise.all([fetchBondingCurve(ctx.rpc, curve), ctx.getConfigData({})])
+    const [finalCurveState, traderTokenBalance] = await Promise.all([
+      fetchBondingCurve(ctx.rpc, curve),
+      ctx.getTokenBalance({ address: trader.address, mint: token }),
+    ])
+    891_902_953_586_497n
+    console.log(traderTokenBalance)
 
-    expect(finalCurveState.data.migrationStatus).toBe(2)
-    expect(finalCurveState.data.sqrtPrice).toBeGreaterThan(configState.data.curve[0].sqrtPrice)
+    expect(finalCurveState.data.migrationStatus).toBe(1)
     expect(finalCurveState.data.curveFinishTimestamp).toBeGreaterThan(0n)
 
     const migrationResult = await ctx.migrate({ curve, baseMint: token })
 
-    const [postMigrationCurveState, traderTokenBalance] = await Promise.all([
-      fetchBondingCurve(ctx.rpc, curve),
-      ctx.getTokenBalance({ address: trader.address, mint: token }),
+    const [postMigrationCurveState] = await Promise.all([
+      fetchBondingCurve(ctx.rpc, curve)
     ])
 
     expect(postMigrationCurveState.data.migrationStatus).toBe(3)

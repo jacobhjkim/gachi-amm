@@ -67,8 +67,6 @@ localnet:
 		--clone-upgradeable-program metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s \
 		--clone cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG \
 		--clone-upgradeable-program cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG \
-		--clone LocpQgucEQHbqNABEYvBvwoxCPsSbG91A1QaQhQQqjn \
-		--clone-upgradeable-program LocpQgucEQHbqNABEYvBvwoxCPsSbG91A1QaQhQQqjn \
 		--clone dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN \
 		--clone-upgradeable-program dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN \
 		--clone AeLtDKgw3XnXbr3Kgfbcb7KiZULVCQ5mXaFDiG9n7EgW \

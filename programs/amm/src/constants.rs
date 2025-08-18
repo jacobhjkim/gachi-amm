@@ -1,11 +1,14 @@
+use anchor_lang::solana_program::native_token::LAMPORTS_PER_SOL;
+
 pub const MIN_SQRT_PRICE: u128 = 4295048016;
 pub const MAX_SQRT_PRICE: u128 = 79226673521066979257578248091;
 
-// Number of bits to scale. This will decide the position of the radix point.
-pub const MAX_CURVE_POINT: usize = 3;
-
 // Token supply configuration (values include decimals)
 pub const TOKEN_TOTAL_SUPPLY: u64 = 1_000_000_000_000_000; // 1B tokens with 6 decimals
+pub const INITIAL_REAL_TOKEN_RESERVES: u64 = 793_100_000_000_000; // ~793.1M tokens with 6 decimals
+pub const INITIAL_VIRTUAL_TOKEN_RESERVES: u64 = 1_073_000_000_000_000; // ~1.073B tokens with 6 decimals
+pub const INITIAL_VIRTUAL_SOL_RESERVES: u64 = 30 * LAMPORTS_PER_SOL; // 30 SOL with 9 decimals
+pub const MAX_VIRTUAL_SOL_RESERVES: u64 = 115_005_359_056;
 
 // Validation limits
 pub const MAX_NAME_LENGTH: usize = 32;
@@ -14,13 +17,13 @@ pub const MAX_URI_LENGTH: usize = 200;
 
 pub mod cashback {
     // Cashback percentages (in basis points out of 10000, representing percentage of fee)
-    pub const CASHBACK_WOOD_BPS: u64 = 50; // 0.05% of sol amount
-    pub const CASHBACK_BRONZE_BPS: u64 = 100; // 0.10% of sol amount
-    pub const CASHBACK_SILVER_BPS: u64 = 125; // 0.125% of sol amount
-    pub const CASHBACK_GOLD_BPS: u64 = 150; // 0.15% of sol amount
-    pub const CASHBACK_PLATINUM_BPS: u64 = 175; // 0.175% of sol amount
-    pub const CASHBACK_DIAMOND_BPS: u64 = 200; // 0.20% of sol amount
-    pub const CASHBACK_CHAMPION_BPS: u64 = 250; // 0.25% of sol amount
+    pub const CASHBACK_WOOD_BPS: u16 = 50; // 0.05% of sol amount
+    pub const CASHBACK_BRONZE_BPS: u16 = 100; // 0.10% of sol amount
+    pub const CASHBACK_SILVER_BPS: u16 = 125; // 0.125% of sol amount
+    pub const CASHBACK_GOLD_BPS: u16 = 150; // 0.15% of sol amount
+    pub const CASHBACK_PLATINUM_BPS: u16 = 175; // 0.175% of sol amount
+    pub const CASHBACK_DIAMOND_BPS: u16 = 200; // 0.20% of sol amount
+    pub const CASHBACK_CHAMPION_BPS: u16 = 250; // 0.25% of sol amount
 
     // Claim restrictions
     pub const CASHBACK_CLAIM_COOLDOWN: i64 = 7 * 24 * 60 * 60; // 7 days in seconds
@@ -47,5 +50,4 @@ pub mod seeds {
     pub const METEORA_METADATA_PREFIX: &[u8] = b"meteora";
     pub const DAMM_V2_METADATA_PREFIX: &[u8] = b"damm_v2";
     pub const VIRTUAL_POOL_METADATA_PREFIX: &[u8] = b"virtual_pool_metadata";
-    pub const BASE_LOCKER_PREFIX: &[u8] = b"base_locker";
 }

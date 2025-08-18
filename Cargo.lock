@@ -78,7 +78,6 @@ dependencies = [
  "bytemuck",
  "const-crypto",
  "damm-v2",
- "locker",
  "mpl-token-metadata",
  "num-traits",
  "num_enum",
@@ -1192,14 +1191,6 @@ checksum = "96936507f153605bddfcda068dd804796c84324ed2510809e5b2a624c81da765"
 dependencies = [
  "autocfg",
  "scopeguard",
-]
-
-[[package]]
-name = "locker"
-version = "0.0.1"
-dependencies = [
- "anchor-lang",
- "bytemuck",
 ]
 
 [[package]]

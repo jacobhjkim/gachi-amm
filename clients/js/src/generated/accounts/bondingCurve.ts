@@ -65,15 +65,23 @@ export type BondingCurve = {
   quoteVault: Address;
   /** base reserve */
   baseReserve: bigint;
+  /** virtual base reserve, used for price calculation */
+  virtualBaseReserve: bigint;
   /** quote reserve */
   quoteReserve: bigint;
-  /** current price */
+  /** virtual quote reserve, used for price calculation */
+  virtualQuoteReserve: bigint;
+  /** current sqrt_price */
   sqrtPrice: bigint;
   /** curve type, spl token or token2022 */
   curveType: number;
+  /** fee type, (0: project/creator, 1: meme/community, 2: blocked) */
+  feeType: number;
+  /** if the curve's fee_type has been reviewed by the admins. (0: not reviewed, 1: reviewed) */
+  feeTypeReviewed: number;
   /** is migrated */
   isMigrated: number;
-  /** migration status enum (0: PreBondingCurve, 1: PostBondingCurve, 2: LockedVesting, 3: CreatedPool) */
+  /** migration status enum (0: PreBondingCurve, 1: PostBondingCurve, 2: CreatedPool) */
   migrationStatus: number;
   /** padding 1 */
   padding1: ReadonlyUint8Array;
@@ -81,7 +89,7 @@ export type BondingCurve = {
   curveFinishTimestamp: bigint;
   /** The protocol fee */
   protocolFee: bigint;
-  /** The creator fee */
+  /** The creator/meme fee reserve */
   creatorFee: bigint;
 };
 
@@ -98,15 +106,23 @@ export type BondingCurveArgs = {
   quoteVault: Address;
   /** base reserve */
   baseReserve: number | bigint;
+  /** virtual base reserve, used for price calculation */
+  virtualBaseReserve: number | bigint;
   /** quote reserve */
   quoteReserve: number | bigint;
-  /** current price */
+  /** virtual quote reserve, used for price calculation */
+  virtualQuoteReserve: number | bigint;
+  /** current sqrt_price */
   sqrtPrice: number | bigint;
   /** curve type, spl token or token2022 */
   curveType: number;
+  /** fee type, (0: project/creator, 1: meme/community, 2: blocked) */
+  feeType: number;
+  /** if the curve's fee_type has been reviewed by the admins. (0: not reviewed, 1: reviewed) */
+  feeTypeReviewed: number;
   /** is migrated */
   isMigrated: number;
-  /** migration status enum (0: PreBondingCurve, 1: PostBondingCurve, 2: LockedVesting, 3: CreatedPool) */
+  /** migration status enum (0: PreBondingCurve, 1: PostBondingCurve, 2: CreatedPool) */
   migrationStatus: number;
   /** padding 1 */
   padding1: ReadonlyUint8Array;
@@ -114,7 +130,7 @@ export type BondingCurveArgs = {
   curveFinishTimestamp: number | bigint;
   /** The protocol fee */
   protocolFee: number | bigint;
-  /** The creator fee */
+  /** The creator/meme fee reserve */
   creatorFee: number | bigint;
 };
 
@@ -128,12 +144,16 @@ export function getBondingCurveEncoder(): FixedSizeEncoder<BondingCurveArgs> {
       ['baseVault', getAddressEncoder()],
       ['quoteVault', getAddressEncoder()],
       ['baseReserve', getU64Encoder()],
+      ['virtualBaseReserve', getU64Encoder()],
       ['quoteReserve', getU64Encoder()],
+      ['virtualQuoteReserve', getU64Encoder()],
       ['sqrtPrice', getU128Encoder()],
       ['curveType', getU8Encoder()],
+      ['feeType', getU8Encoder()],
+      ['feeTypeReviewed', getU8Encoder()],
       ['isMigrated', getU8Encoder()],
       ['migrationStatus', getU8Encoder()],
-      ['padding1', fixEncoderSize(getBytesEncoder(), 5)],
+      ['padding1', fixEncoderSize(getBytesEncoder(), 3)],
       ['curveFinishTimestamp', getU64Encoder()],
       ['protocolFee', getU64Encoder()],
       ['creatorFee', getU64Encoder()],
@@ -151,12 +171,16 @@ export function getBondingCurveDecoder(): FixedSizeDecoder<BondingCurve> {
     ['baseVault', getAddressDecoder()],
     ['quoteVault', getAddressDecoder()],
     ['baseReserve', getU64Decoder()],
+    ['virtualBaseReserve', getU64Decoder()],
     ['quoteReserve', getU64Decoder()],
+    ['virtualQuoteReserve', getU64Decoder()],
     ['sqrtPrice', getU128Decoder()],
     ['curveType', getU8Decoder()],
+    ['feeType', getU8Decoder()],
+    ['feeTypeReviewed', getU8Decoder()],
     ['isMigrated', getU8Decoder()],
     ['migrationStatus', getU8Decoder()],
-    ['padding1', fixDecoderSize(getBytesDecoder(), 5)],
+    ['padding1', fixDecoderSize(getBytesDecoder(), 3)],
     ['curveFinishTimestamp', getU64Decoder()],
     ['protocolFee', getU64Decoder()],
     ['creatorFee', getU64Decoder()],
@@ -224,5 +248,5 @@ export async function fetchAllMaybeBondingCurve(
 }
 
 export function getBondingCurveSize(): number {
-  return 232;
+  return 248;
 }

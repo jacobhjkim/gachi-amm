@@ -1,7 +1,9 @@
 use anchor_lang::prelude::*;
 use anchor_lang::{AnchorDeserialize, AnchorSerialize};
-use anchor_spl::associated_token::get_associated_token_address;
-use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
+use anchor_spl::{
+    associated_token::get_associated_token_address,
+    token_interface::{Mint, TokenAccount, TokenInterface},
+};
 
 use crate::{
     const_pda,
@@ -213,7 +215,7 @@ pub fn handle_swap(ctx: Context<SwapCtx>, params: SwapParameters) -> Result<()> 
 
     // validate if it is over threshold (aka ready for migration)
     require!(
-        !curve.is_curve_complete(config.migration_quote_threshold),
+        !curve.is_curve_complete(config.migration_base_threshold),
         AmmError::PoolIsCompleted
     );
 
@@ -234,6 +236,7 @@ pub fn handle_swap(ctx: Context<SwapCtx>, params: SwapParameters) -> Result<()> 
         ctx.accounts.l3_referral_cashback_token_account.is_some(),
         cashback_tier,
     )?;
+    msg!("Swap result: {:?}", swap_result);
 
     require!(
         swap_result.output_amount >= minimum_amount_out,
@@ -334,13 +337,18 @@ pub fn handle_swap(ctx: Context<SwapCtx>, params: SwapParameters) -> Result<()> 
         has_referral,
     });
 
-    if curve.is_curve_complete(config.migration_quote_threshold) {
+    msg!("curve: {:?}", curve);
+
+    if curve.is_curve_complete(config.migration_base_threshold) {
         ctx.accounts.base_vault.reload()?;
         // validate if base reserve is enough token for migration
         let base_vault_balance = ctx.accounts.base_vault.amount;
 
         msg!("Base vault balance: {}", base_vault_balance);
-        msg!("Migration base threshold: {}", config.migration_base_threshold);
+        msg!(
+            "Migration base threshold: {}",
+            config.migration_base_threshold
+        );
 
         require!(
             base_vault_balance >= config.migration_base_threshold,
@@ -350,13 +358,7 @@ pub fn handle_swap(ctx: Context<SwapCtx>, params: SwapParameters) -> Result<()> 
         // set finish time and migration progress
         let current_timestamp = Clock::get()?.unix_timestamp as u64;
         curve.curve_finish_timestamp = current_timestamp;
-
-        let locked_vesting_params = config.locked_vesting_config.to_locked_vesting_params();
-        if locked_vesting_params.has_vesting() {
-            curve.set_migration_status(MigrationStatus::PostBondingCurve.into());
-        } else {
-            curve.set_migration_status(MigrationStatus::LockedVesting.into());
-        }
+        curve.set_migration_status(MigrationStatus::PostBondingCurve.into());
 
         emit_cpi!(EvtCurveComplete {
             curve: ctx.accounts.curve.key(),

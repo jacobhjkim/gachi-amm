@@ -10,7 +10,7 @@ use crate::{
     utils::token::transfer_from_curve,
 };
 
-/// Accounts for partner to claim fees
+/// Accounts for protocol admin to claim fees
 #[event_cpi]
 #[derive(Accounts)]
 pub struct ClaimProtocolFeeCtx<'info> {

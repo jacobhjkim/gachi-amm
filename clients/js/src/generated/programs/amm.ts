@@ -20,9 +20,9 @@ import {
   type ParsedCreateCashbackInstruction,
   type ParsedCreateConfigInstruction,
   type ParsedCreateCurveWithSplTokenInstruction,
-  type ParsedCreateLockerInstruction,
   type ParsedMigrateDammV2Instruction,
   type ParsedReclaimInactiveCashbackInstruction,
+  type ParsedSetFeeTypeInstruction,
   type ParsedSwapInstruction,
   type ParsedUpdateCashbackTierInstruction,
 } from '../instructions';
@@ -85,9 +85,9 @@ export enum AmmInstruction {
   CreateCashback,
   CreateConfig,
   CreateCurveWithSplToken,
-  CreateLocker,
   MigrateDammV2,
   ReclaimInactiveCashback,
+  SetFeeType,
   Swap,
   UpdateCashbackTier,
 }
@@ -166,17 +166,6 @@ export function identifyAmmInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
-        new Uint8Array([167, 90, 137, 154, 75, 47, 17, 84])
-      ),
-      0
-    )
-  ) {
-    return AmmInstruction.CreateLocker;
-  }
-  if (
-    containsBytes(
-      data,
-      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([240, 234, 220, 49, 150, 233, 1, 60])
       ),
       0
@@ -194,6 +183,17 @@ export function identifyAmmInstruction(
     )
   ) {
     return AmmInstruction.ReclaimInactiveCashback;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([187, 117, 49, 74, 182, 25, 242, 244])
+      ),
+      0
+    )
+  ) {
+    return AmmInstruction.SetFeeType;
   }
   if (
     containsBytes(
@@ -244,14 +244,14 @@ export type ParsedAmmInstruction<
       instructionType: AmmInstruction.CreateCurveWithSplToken;
     } & ParsedCreateCurveWithSplTokenInstruction<TProgram>)
   | ({
-      instructionType: AmmInstruction.CreateLocker;
-    } & ParsedCreateLockerInstruction<TProgram>)
-  | ({
       instructionType: AmmInstruction.MigrateDammV2;
     } & ParsedMigrateDammV2Instruction<TProgram>)
   | ({
       instructionType: AmmInstruction.ReclaimInactiveCashback;
     } & ParsedReclaimInactiveCashbackInstruction<TProgram>)
+  | ({
+      instructionType: AmmInstruction.SetFeeType;
+    } & ParsedSetFeeTypeInstruction<TProgram>)
   | ({ instructionType: AmmInstruction.Swap } & ParsedSwapInstruction<TProgram>)
   | ({
       instructionType: AmmInstruction.UpdateCashbackTier;

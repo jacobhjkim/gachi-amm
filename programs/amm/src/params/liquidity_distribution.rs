@@ -1,177 +1,98 @@
-use std::u64;
-
+use crate::AmmError;
 use anchor_lang::prelude::*;
 use ruint::aliases::U256;
 
-use crate::{
-    constants::{fee::FEE_DENOMINATOR, MAX_SQRT_PRICE, MIN_SQRT_PRICE},
-    curve::{
-        get_delta_amount_base_unsigned_256, get_delta_amount_quote_unsigned_256,
-        get_initial_liquidity_from_delta_quote, get_next_sqrt_price_from_input,
-    },
-    safe_math::{safe_mul_div_cast_u64, SafeMath},
-    states::LiquidityDistributionConfig,
-    u128x128_math::Rounding,
-    AmmError,
-};
-
-#[cfg(feature = "local")]
-use crate::curve::get_initialize_amounts;
-
-#[derive(Copy, Clone, Debug, AnchorSerialize, AnchorDeserialize, InitSpace, Default)]
-pub struct LiquidityDistributionParameters {
-    pub sqrt_price: u128,
-    pub liquidity: u128,
-}
-
-impl LiquidityDistributionParameters {
-    pub fn to_liquidity_distribution_config(&self) -> LiquidityDistributionConfig {
-        LiquidityDistributionConfig {
-            sqrt_price: self.sqrt_price,
-            liquidity: self.liquidity,
-        }
-    }
-}
-
-pub fn get_base_token_for_swap(
-    sqrt_start_price: u128,
-    sqrt_migration_price: u128,
-    curve: &[LiquidityDistributionParameters],
-) -> Result<U256> {
-    let mut total_amount = U256::ZERO;
-    for i in 0..curve.len() {
-        let lower_sqrt_price = if i == 0 {
-            sqrt_start_price
-        } else {
-            curve[i - 1].sqrt_price
-        };
-        if curve[i].sqrt_price > sqrt_migration_price {
-            let delta_amount = get_delta_amount_base_unsigned_256(
-                lower_sqrt_price,
-                sqrt_migration_price,
-                curve[i].liquidity,
-                Rounding::Up, // TODO check whether we should use round down or round up
-            )?;
-            total_amount = total_amount.safe_add(delta_amount)?;
-            break;
-        } else {
-            let delta_amount = get_delta_amount_base_unsigned_256(
-                lower_sqrt_price,
-                curve[i].sqrt_price,
-                curve[i].liquidity,
-                Rounding::Up, // TODO check whether we should use round down or round up
-            )?;
-            total_amount = total_amount.safe_add(delta_amount)?;
-        }
-    }
-    Ok(total_amount)
-}
-
-fn get_migration_quote_amount(
-    migration_quote_threshold: u64,
-    migration_fee_basis_points: u16,
-) -> Result<u64> {
-    let quote_amount: u64 = safe_mul_div_cast_u64(
-        migration_quote_threshold,
-        FEE_DENOMINATOR.safe_sub(migration_fee_basis_points as u64)?,
-        FEE_DENOMINATOR,
-        Rounding::Up,
-    )?;
-    Ok(quote_amount)
-}
-
-pub fn get_migration_base_token(
-    migration_threshold: u64,
-    migration_fee_basis_points: u16,
-    sqrt_migration_price: u128,
-) -> Result<u64> {
-    let quote_amount = get_migration_quote_amount(migration_threshold, migration_fee_basis_points)?;
-    // calculate to L firstly
-    let liquidity =
-        get_initial_liquidity_from_delta_quote(quote_amount, MIN_SQRT_PRICE, sqrt_migration_price)?;
-    // calculate base threshold
-    let base_amount = get_delta_amount_base_unsigned_256(
-        sqrt_migration_price,
-        MAX_SQRT_PRICE,
-        liquidity,
-        Rounding::Up,
-    )?;
-    require!(base_amount <= U256::from(u64::MAX), AmmError::MathOverflow);
-    let base_amount = base_amount
-        .try_into()
-        .map_err(|_| AmmError::TypeCastFailed)?;
-
-    // re-validation
-    #[cfg(feature = "local")]
-    {
-        let (_initial_base_amount, initial_quote_amount) = get_initialize_amounts(
-            MIN_SQRT_PRICE,
-            MAX_SQRT_PRICE,
-            sqrt_migration_price,
-            liquidity,
-        )?;
-        // TODO no need to validate for _initial_base_amount?
-        msg!("debug dammv2 {} {}", initial_quote_amount, quote_amount);
-        require!(
-            initial_quote_amount <= quote_amount,
-            AmmError::InsufficientLiquidityForMigration
-        );
-    }
-    Ok(base_amount)
-}
-
-pub fn get_migration_threshold_price(
-    migration_threshold: u64,
-    sqrt_start_price: u128,
-    curve: &[LiquidityDistributionParameters],
+/// Calculate sqrt price from price
+/// Based on the formula: price = (sqrtPrice >> 64)^2 * 10^(tokenADecimal - tokenBDecimal)
+/// Therefore: sqrtPrice = sqrt(price / 10^(tokenADecimal - tokenBDecimal)) << 64
+fn get_sqrt_price_from_price(
+    price: U256, // price = quote_amount / base_amount
+    base_decimal: u8,
+    quote_decimal: u8,
 ) -> Result<u128> {
-    let mut next_sqrt_price = sqrt_start_price;
-
-    let total_amount = get_delta_amount_quote_unsigned_256(
-        next_sqrt_price,
-        curve[0].sqrt_price,
-        curve[0].liquidity,
-        Rounding::Up, // TODO check whether we should use round down or round up
-    )?;
-    if total_amount > U256::from(migration_threshold) {
-        next_sqrt_price = get_next_sqrt_price_from_input(
-            next_sqrt_price,
-            curve[0].liquidity,
-            migration_threshold,
-            false,
-        )?;
+    // Adjust for decimal difference
+    let decimal_diff = (base_decimal as i32) - (quote_decimal as i32);
+    let price_adjusted = if decimal_diff > 0 {
+        // base has more decimals than quote, divide by 10^diff
+        price
+            .checked_div(U256::from(10u128.pow(decimal_diff as u32)))
+            .ok_or(AmmError::MathOverflow)?
+    } else if decimal_diff < 0 {
+        // quote has more decimals than base, multiply by 10^abs(diff)
+        price
+            .checked_mul(U256::from(10u128.pow((-decimal_diff) as u32)))
+            .ok_or(AmmError::MathOverflow)?
     } else {
-        let total_amount = total_amount
-            .try_into()
-            .map_err(|_| AmmError::TypeCastFailed)?;
-        let mut amount_left = migration_threshold.safe_sub(total_amount)?;
-        next_sqrt_price = curve[0].sqrt_price;
-        for i in 1..curve.len() {
-            let max_amount = get_delta_amount_quote_unsigned_256(
-                next_sqrt_price,
-                curve[i].sqrt_price,
-                curve[i].liquidity,
-                Rounding::Up, // TODO check whether we should use round down or round up
-            )?;
-            if max_amount > U256::from(amount_left) {
-                next_sqrt_price = get_next_sqrt_price_from_input(
-                    next_sqrt_price,
-                    curve[i].liquidity,
-                    amount_left,
-                    false,
-                )?;
-                amount_left = 0;
-                break;
-            } else {
-                amount_left = amount_left.safe_sub(
-                    max_amount
-                        .try_into()
-                        .map_err(|_| AmmError::TypeCastFailed)?,
-                )?;
-                next_sqrt_price = curve[i].sqrt_price
-            }
-        }
-        require!(amount_left == 0, AmmError::NotEnoughLiquidity);
+        price
+    };
+
+    // Calculate sqrt
+    let sqrt_price = sqrt_u256(price_adjusted)?;
+
+    // Scale by 2^64
+    let sqrt_price_q64 = sqrt_price
+        .checked_mul(U256::from(1u128 << 64))
+        .ok_or(AmmError::MathOverflow)?;
+
+    // Ensure the result fits in u128
+    sqrt_price_q64
+        .try_into()
+        .map_err(|_| AmmError::TypeCastFailed.into())
+}
+
+/// Calculate sqrt price from base and quote amounts
+pub fn get_sqrt_price_from_amounts(
+    base_amount: u128,
+    quote_amount: u128,
+    base_decimal: u8,
+    quote_decimal: u8,
+) -> Result<u128> {
+    require!(base_amount > 0, AmmError::AmountIsZero);
+
+    // Calculate price with high precision
+    // price = quote_amount / base_amount
+    // Scale up to maintain precision
+    let scale = U256::from(10u128.pow(18));
+    let price_scaled = U256::from(quote_amount)
+        .checked_mul(scale)
+        .ok_or(AmmError::MathOverflow)?
+        .checked_div(U256::from(base_amount))
+        .ok_or(AmmError::MathOverflow)?;
+
+    get_sqrt_price_from_price(price_scaled, base_decimal, quote_decimal)
+}
+
+/// Calculate square root of U256 using Newton's method
+fn sqrt_u256(value: U256) -> Result<U256> {
+    if value == U256::ZERO {
+        return Ok(U256::ZERO);
     }
-    Ok(next_sqrt_price)
+
+    // Initial guess: use bit length to get a better starting point
+    let mut x = U256::from(1u128);
+    let bits = value.bit_len();
+    if bits > 1 {
+        x = x << ((bits - 1) / 2);
+    }
+
+    // Newton's method: x_new = (x + value/x) / 2
+    let mut prev_x;
+    let max_iterations = 255;
+    let mut iterations = 0;
+
+    loop {
+        prev_x = x;
+        let div_result = value.checked_div(x).ok_or(AmmError::MathOverflow)?;
+        x = (x + div_result) >> 1;
+
+        iterations += 1;
+        if x == prev_x || iterations >= max_iterations {
+            break;
+        }
+    }
+
+    // Ensure we converged
+    require!(iterations < max_iterations, AmmError::MathOverflow);
+
+    Ok(x)
 }

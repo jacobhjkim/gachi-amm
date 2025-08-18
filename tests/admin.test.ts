@@ -8,7 +8,7 @@ import {
   L1_REFERRAL_FEE_BASIS_POINTS,
   L2_REFERRAL_FEE_BASIS_POINTS,
   L3_REFERRAL_FEE_BASIS_POINTS,
-  LOCKED_VESTING,
+  MEME_FEE_BASIS_POINTS,
   MIGRATION_FEE_BASIS_POINTS,
   REFEREE_DISCOUNT_BASIS_POINTS,
   WSOL_MINT,
@@ -55,14 +55,14 @@ const expectConfigValues = (
   if (expected.creatorFeeBasisPoints !== undefined) {
     expect(config.data.creatorFeeBasisPoints).toEqual(expected.creatorFeeBasisPoints)
   }
+  if (expected.memeFeeBasisPoints !== undefined) {
+    expect(config.data.memeFeeBasisPoints).toEqual(expected.memeFeeBasisPoints)
+  }
   if (expected.initialSqrtPrice !== undefined) {
     expect(config.data.initialSqrtPrice).toEqual(expected.initialSqrtPrice)
   }
   if (expected.migrationQuoteThreshold !== undefined) {
     expect(config.data.migrationQuoteThreshold).toEqual(expected.migrationQuoteThreshold)
-  }
-  if (expected.lockedVestingConfig !== undefined) {
-    expect(config.data.lockedVestingConfig).toEqual(expected.lockedVestingConfig)
   }
   if (expected.curve !== undefined) {
     expect(config.data.curve.slice(0, 2)).toEqual(expected.curve)
@@ -76,7 +76,7 @@ describe('Admin Config Tests', () => {
     ctx = await TestContextClass.create()
   })
 
-  test('create config - spl token (no vesting)', async () => {
+  test('create config - spl token', async () => {
     const createConfigResult = await ctx.createConfig(DEFAULT_CONFIG_ARGS, WSOL_MINT)
     const config = await ctx.getConfigData({ configAddress: createConfigResult.configAddress })
 
@@ -92,40 +92,10 @@ describe('Admin Config Tests', () => {
       l3ReferralFeeBasisPoints: L3_REFERRAL_FEE_BASIS_POINTS,
       refereeDiscountBasisPoints: REFEREE_DISCOUNT_BASIS_POINTS,
       creatorFeeBasisPoints: CREATOR_FEE_BASIS_POINTS,
+      memeFeeBasisPoints: MEME_FEE_BASIS_POINTS,
       migrationFeeBasisPoints: MIGRATION_FEE_BASIS_POINTS,
       initialSqrtPrice: DEFAULT_CONFIG_ARGS.initialSqrtPrice,
       migrationQuoteThreshold: DEFAULT_CONFIG_ARGS.migrationQuoteThreshold,
-      lockedVestingConfig: DEFAULT_CONFIG_ARGS.lockedVesting,
-      curve: DEFAULT_CONFIG_ARGS.curve,
-    })
-  })
-
-  test('create config - spl token (with vesting)', async () => {
-    const createConfigResult = await ctx.createConfig(
-      {
-        ...DEFAULT_CONFIG_ARGS,
-        lockedVesting: LOCKED_VESTING,
-      },
-      WSOL_MINT,
-    )
-    const config = await ctx.getConfigData({ configAddress: createConfigResult.configAddress })
-
-    expectConfigValues(config, {
-      quoteMint: WSOL_MINT,
-      feeClaimer: createConfigResult.feeClaimer.address,
-      tokenType: 0,
-      quoteTokenFlag: 0,
-      tokenDecimal: 6,
-      feeBasisPoints: FEE_BASIS_POINTS,
-      l1ReferralFeeBasisPoints: L1_REFERRAL_FEE_BASIS_POINTS,
-      l2ReferralFeeBasisPoints: L2_REFERRAL_FEE_BASIS_POINTS,
-      l3ReferralFeeBasisPoints: L3_REFERRAL_FEE_BASIS_POINTS,
-      refereeDiscountBasisPoints: REFEREE_DISCOUNT_BASIS_POINTS,
-      creatorFeeBasisPoints: CREATOR_FEE_BASIS_POINTS,
-      migrationFeeBasisPoints: MIGRATION_FEE_BASIS_POINTS,
-      initialSqrtPrice: DEFAULT_CONFIG_ARGS.initialSqrtPrice,
-      migrationQuoteThreshold: DEFAULT_CONFIG_ARGS.migrationQuoteThreshold,
-      lockedVestingConfig: LOCKED_VESTING,
       curve: DEFAULT_CONFIG_ARGS.curve,
     })
   })
@@ -152,10 +122,10 @@ describe('Admin Config Tests', () => {
       l3ReferralFeeBasisPoints: L3_REFERRAL_FEE_BASIS_POINTS,
       refereeDiscountBasisPoints: REFEREE_DISCOUNT_BASIS_POINTS,
       creatorFeeBasisPoints: CREATOR_FEE_BASIS_POINTS,
+      memeFeeBasisPoints: MEME_FEE_BASIS_POINTS,
       migrationFeeBasisPoints: MIGRATION_FEE_BASIS_POINTS,
       initialSqrtPrice: DEFAULT_CONFIG_ARGS.initialSqrtPrice,
       migrationQuoteThreshold: DEFAULT_CONFIG_ARGS.migrationQuoteThreshold,
-      lockedVestingConfig: DEFAULT_CONFIG_ARGS.lockedVesting,
       curve: DEFAULT_CONFIG_ARGS.curve,
     })
   })
@@ -180,10 +150,10 @@ describe('Admin Config Tests', () => {
       l3ReferralFeeBasisPoints: L3_REFERRAL_FEE_BASIS_POINTS,
       refereeDiscountBasisPoints: REFEREE_DISCOUNT_BASIS_POINTS,
       creatorFeeBasisPoints: CREATOR_FEE_BASIS_POINTS,
+      memeFeeBasisPoints: MEME_FEE_BASIS_POINTS,
       migrationFeeBasisPoints: MIGRATION_FEE_BASIS_POINTS,
       initialSqrtPrice: DEFAULT_CONFIG_ARGS.initialSqrtPrice,
       migrationQuoteThreshold: DEFAULT_CONFIG_ARGS.migrationQuoteThreshold,
-      lockedVestingConfig: DEFAULT_CONFIG_ARGS.lockedVesting,
       curve: DEFAULT_CONFIG_ARGS.curve,
     })
   })
@@ -367,34 +337,6 @@ describe('Admin Config Tests', () => {
         },
         quoteMint: WSOL_MINT,
         expectedError: 'InvalidCurve',
-      },
-      {
-        name: 'rejects vesting with zero frequency but non-zero amounts',
-        args: {
-          ...baseValidArgs,
-          lockedVesting: {
-            amountPerPeriod: 1000n,
-            cliffDurationFromMigrationTime: 100n,
-            frequency: 0n, // zero frequency but non-zero amounts, should fail
-            numberOfPeriod: 10n,
-            cliffUnlockAmount: 500n,
-          },
-        },
-        quoteMint: WSOL_MINT,
-        expectedError: 'InvalidVestingParameters',
-      },
-      {
-        name: 'rejects vesting with zero total amount',
-        args: {
-          ...baseValidArgs,
-          lockedVesting: {
-            amountPerPeriod: 0n, // zero amount per period
-            cliffDurationFromMigrationTime: 100n,
-            frequency: 1n,
-            numberOfPeriod: 10n,
-            cliffUnlockAmount: 0n, // zero cliff unlock amount
-          },
-        },
       },
     ]
 
