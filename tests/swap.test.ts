@@ -91,7 +91,9 @@ describe('Swap Tests', () => {
     expect(curveInitialBaseBalance - curveBaseAfterFirstBuy).toBe(traderTokensAfterFirstBuy)
     expect(curveStateAfterFirstBuy.data.protocolFee).toBe(firstBuyExpected.protocolFee)
     expect(curveStateAfterFirstBuy.data.creatorFee).toBe(firstBuyExpected.creatorFee)
-    expect(curveStateAfterFirstBuy.data.quoteReserve).toBe(initialCurveState.data.quoteReserve + buyAmount)
+    expect(curveStateAfterFirstBuy.data.quoteReserve).toBe(
+      initialCurveState.data.quoteReserve + firstBuyExpected.actualInputAmount,
+    )
     expect(curveStateAfterFirstBuy.data.baseReserve).toBe(
       initialCurveState.data.baseReserve - traderTokensAfterFirstBuy,
     )
@@ -120,7 +122,7 @@ describe('Swap Tests', () => {
     // Verify second buy got fewer tokens (price impact)
     expect(traderTokensAfterFirstBuy).toBeGreaterThan(tokensFromSecondBuy)
     expect(bondingCurveStateAfterSecondBuy.data.quoteReserve).toBe(
-      curveStateAfterFirstBuy.data.quoteReserve + buyAmount,
+      curveStateAfterFirstBuy.data.quoteReserve + secondBuyExpected.actualInputAmount,
     )
     expect(bondingCurveStateAfterSecondBuy.data.baseReserve).toBe(
       curveStateAfterFirstBuy.data.baseReserve - tokensFromSecondBuy,
@@ -747,10 +749,12 @@ describe('Swap Tests', () => {
     ])
 
     // The entire buyAmount is added to the bonding curve's quote reserves
-    expect(curveStateAfter.data.quoteReserve).toBe(curveStateBefore.data.quoteReserve + buyAmount)
+    expect(curveStateAfter.data.quoteReserve).toBe(curveStateBefore.data.quoteReserve + swapResult.actualInputAmount)
     expect(curveStateAfter.data.baseReserve).toBe(curveStateBefore.data.baseReserve - tokensReceived)
     expect(curveStateAfter.data.creatorFee).toBe(swapResult.creatorFee)
-    expect(curveStateAfter.data.quoteReserve).toBe(curveQuoteVaultBalance)
+    expect(curveStateAfter.data.quoteReserve + curveStateAfter.data.protocolFee + curveStateAfter.data.creatorFee).toBe(
+      curveQuoteVaultBalance,
+    )
     expect(curveStateAfter.data.baseReserve).toBe(curveBaseVaultBalance)
   })
 

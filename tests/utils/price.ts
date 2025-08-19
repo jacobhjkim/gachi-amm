@@ -1,7 +1,7 @@
 import BN from 'bn.js'
 import Decimal from 'decimal.js'
-import { mulDiv, Rounding } from './math.ts'
 import { DEFAULT_CONFIG_ARGS, FEE_DENOMINATOR, MIGRATION_FEE_BASIS_POINTS } from './constants.ts'
+import { Rounding, mulDiv } from './math.ts'
 
 /**
  * Get the sqrt price from the price
@@ -15,7 +15,7 @@ export const getSqrtPriceFromPrice = ({
   migrationQuoteAmount: Decimal
   migrationBaseAmount: Decimal
 }): BN => {
-  let migrationPrice = migrationQuoteAmount.div(migrationBaseAmount)
+  const migrationPrice = migrationQuoteAmount.div(migrationBaseAmount)
   const sqrtValue = Decimal.sqrt(migrationPrice)
   const sqrtValueQ64 = sqrtValue.mul(Decimal.pow(2, 64))
 

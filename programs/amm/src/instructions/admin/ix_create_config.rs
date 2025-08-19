@@ -108,7 +108,8 @@ impl ConfigParameters {
         require!(
             self.initial_virtual_quote_reserve > 0
                 && self.initial_virtual_base_reserve > 0
-                && self.migration_base_threshold > 0,
+                && self.migration_base_threshold > 0
+                && self.migration_quote_threshold > 0,
             AmmError::InvalidAmmConfig
         );
 
@@ -179,6 +180,7 @@ pub fn handle_create_config(
         config_params.l3_referral_fee_basis_points,
         config_params.referee_discount_basis_points,
         config_params.creator_fee_basis_points,
+        config_params.meme_fee_basis_points,
         config_params.migration_fee_basis_points,
         /* Price configurations */
         config_params.migration_base_threshold,

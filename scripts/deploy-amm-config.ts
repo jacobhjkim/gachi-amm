@@ -1,9 +1,3 @@
-import { address, createSolanaClient, getExplorerLink, signTransactionMessageWithSigners } from 'gill'
-import { loadKeypairSignerFromFile } from 'gill/node'
-import { TOKEN_PROGRAM_ADDRESS } from 'gill/programs'
-import { getAssociatedTokenAccountAddress } from 'gill/programs/token'
-import { AMM_PROGRAM_ADDRESS, getCreateConfigInstructionAsync } from '../clients/js/src/generated'
-import { DEFAULT_CONFIG_ARGS, WSOL_MINT } from '../tests/utils/constants'
 import {
   appendTransactionMessageInstructions,
   createTransactionMessage,
@@ -11,6 +5,12 @@ import {
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
 } from '@solana/kit'
+import { address, createSolanaClient, getExplorerLink, signTransactionMessageWithSigners } from 'gill'
+import { loadKeypairSignerFromFile } from 'gill/node'
+import { TOKEN_PROGRAM_ADDRESS } from 'gill/programs'
+import { getAssociatedTokenAccountAddress } from 'gill/programs/token'
+import { AMM_PROGRAM_ADDRESS, getCreateConfigInstructionAsync } from '../clients/js/src/generated'
+import { DEFAULT_CONFIG_ARGS, WSOL_MINT } from '../tests/utils/constants'
 
 async function main() {
   const owner = await loadKeypairSignerFromFile()

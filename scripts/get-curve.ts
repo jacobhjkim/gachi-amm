@@ -1,7 +1,7 @@
-import { getCurveAuthority, getCurvePda } from '../tests/utils/accounts'
 import { address } from '@solana/kit'
-import { WSOL_MINT } from '../tests/utils/constants'
 import { AMM_PROGRAM_ADDRESS } from '../clients/js/src/generated'
+import { getCurveAuthority, getCurvePda } from '../tests/utils/accounts'
+import { WSOL_MINT } from '../tests/utils/constants'
 
 async function main() {
   const foo = await getCurvePda({

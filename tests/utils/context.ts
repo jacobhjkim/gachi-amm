@@ -1,5 +1,5 @@
 import { expect } from 'bun:test'
-import { AccountRole, pipe, prependTransactionMessageInstructions, Signature } from '@solana/kit'
+import { AccountRole, type Signature, pipe, prependTransactionMessageInstructions } from '@solana/kit'
 import {
   type Address,
   type KeyPairSigner,
@@ -1037,7 +1037,7 @@ export class TestContextClass {
       tokenBProgram: TOKEN_PROGRAM_ADDRESS,
     })
 
-    console.log(`\n=== Token Account Setup ===`)
+    console.log('\n=== Token Account Setup ===')
     console.log(`Input token mint (WSOL): ${inputTokenMint.toString()}`)
     console.log(`Output token mint (custom): ${outputTokenMint.toString()}`)
     console.log(`Input token account: ${inputTokenAccount.toString()}`)
@@ -1065,12 +1065,12 @@ export class TestContextClass {
       // Input token (WSOL) is tokenA
       swapInputAccount = inputTokenAccount
       swapOutputAccount = outputTokenAccount
-      console.log(`Swap direction: tokenA (WSOL) -> tokenB (custom token)`)
+      console.log('Swap direction: tokenA (WSOL) -> tokenB (custom token)')
     } else if (dammPoolState.data.tokenBMint.toString() === inputTokenMint.toString()) {
       // Input token (WSOL) is tokenB
       swapInputAccount = inputTokenAccount
       swapOutputAccount = outputTokenAccount
-      console.log(`Swap direction: tokenB (WSOL) -> tokenA (custom token)`)
+      console.log('Swap direction: tokenB (WSOL) -> tokenA (custom token)')
     } else {
       throw new Error(`Input token ${inputTokenMint.toString()} doesn't match pool tokens`)
     }

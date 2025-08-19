@@ -1,10 +1,15 @@
 import type { BondingCurve, Config } from '~/clients'
-import { CASHBACK_BPS, FEE_DENOMINATOR, RESOLUTION } from './constants'
-import { Rounding, mulDiv } from './math'
+import { FEE_DENOMINATOR } from './constants'
 
 export enum TradeDirection {
   BaseToQuote = 0,
   QuoteToBase = 1,
+}
+
+export enum FeeType {
+  Creator = 0,
+  Meme = 1,
+  Blocked = 2,
 }
 
 export interface FeeBreakdown {
@@ -17,15 +22,9 @@ export interface FeeBreakdown {
   protocolFee: bigint
 }
 
-export interface SwapAmount {
-  outputAmount: bigint
-  nextSqrtPrice: bigint
-}
-
 export interface SwapResult {
   actualInputAmount: bigint
   outputAmount: bigint
-  nextSqrtPrice: bigint
   tradingFee: bigint
   protocolFee: bigint
   cashbackFee: bigint
@@ -35,54 +34,110 @@ export interface SwapResult {
   l3ReferralFee: bigint
 }
 
-// Math helper functions
-
-// Implement FeeBreakdown sum method
-function sumFeeBreakdown(feeBreakdown: FeeBreakdown): bigint {
-  return (
-    feeBreakdown.l1ReferralFee +
-    feeBreakdown.l2ReferralFee +
-    feeBreakdown.l3ReferralFee +
-    feeBreakdown.creatorFee +
-    feeBreakdown.cashbackFee +
-    feeBreakdown.protocolFee
-  )
+// Helper functions for safe math operations
+function safeSub(a: bigint, b: bigint): bigint {
+  if (a < b) {
+    throw new Error('Math underflow')
+  }
+  return a - b
 }
 
+function safeAdd(a: bigint, b: bigint): bigint {
+  const result = a + b
+  if (result < a || result < b) {
+    throw new Error('Math overflow')
+  }
+  return result
+}
+
+function safeMul(a: bigint, b: bigint): bigint {
+  const result = a * b
+  if (a !== 0n && result / a !== b) {
+    throw new Error('Math overflow')
+  }
+  return result
+}
+
+function safeDiv(a: bigint, b: bigint): bigint {
+  if (b === 0n) {
+    throw new Error('Division by zero')
+  }
+  return a / b
+}
+
+// Implements safe_mul_div_cast_u64 with rounding
+function safeMulDiv(x: bigint, y: bigint, denominator: bigint, roundUp: boolean): bigint {
+  if (denominator === 0n) {
+    throw new Error('Division by zero')
+  }
+  const prod = safeMul(x, y)
+  if (roundUp) {
+    return safeDiv(safeAdd(safeAdd(prod, denominator), -1n), denominator)
+  }
+  return safeDiv(prod, denominator)
+}
+
+// Get cashback BPS based on tier
+function getCashbackBps(cashbackTier?: number): bigint {
+  const CASHBACK_BPS_MAP: Record<number, bigint> = {
+    0: 50n, // Wood
+    1: 100n, // Bronze
+    2: 125n, // Silver
+    3: 150n, // Gold
+    4: 175n, // Platinum
+    5: 200n, // Diamond
+    6: 250n, // Champion
+  }
+  return cashbackTier !== undefined ? CASHBACK_BPS_MAP[cashbackTier] || 0n : 0n
+}
+
+// Implements Config::get_fee_on_amount
 export function getFeeOnAmount(
-  configState: Config,
+  config: Config,
   amountIn: bigint,
   hasL1Referral: boolean,
   hasL2Referral: boolean,
   hasL3Referral: boolean,
+  feeType: FeeType,
   cashbackTier?: number,
 ): FeeBreakdown {
   const l1ReferralFee = hasL1Referral
-    ? mulDiv(amountIn, BigInt(configState.l1ReferralFeeBasisPoints), FEE_DENOMINATOR, Rounding.Down)
+    ? safeMulDiv(amountIn, BigInt(config.l1ReferralFeeBasisPoints), FEE_DENOMINATOR, false)
     : 0n
 
   const l2ReferralFee = hasL2Referral
-    ? mulDiv(amountIn, BigInt(configState.l2ReferralFeeBasisPoints), FEE_DENOMINATOR, Rounding.Down)
+    ? safeMulDiv(amountIn, BigInt(config.l2ReferralFeeBasisPoints), FEE_DENOMINATOR, false)
     : 0n
 
   const l3ReferralFee = hasL3Referral
-    ? mulDiv(amountIn, BigInt(configState.l3ReferralFeeBasisPoints), FEE_DENOMINATOR, Rounding.Down)
+    ? safeMulDiv(amountIn, BigInt(config.l3ReferralFeeBasisPoints), FEE_DENOMINATOR, false)
     : 0n
 
-  const cashbackBps = cashbackTier !== undefined ? CASHBACK_BPS[cashbackTier as keyof typeof CASHBACK_BPS] || 0n : 0n
-  const cashbackFee = mulDiv(amountIn, cashbackBps, FEE_DENOMINATOR, Rounding.Down)
+  const cashbackBps = getCashbackBps(cashbackTier)
+  const cashbackFee = safeMulDiv(amountIn, cashbackBps, FEE_DENOMINATOR, false)
 
-  const creatorFee = mulDiv(amountIn, BigInt(configState.creatorFeeBasisPoints), FEE_DENOMINATOR, Rounding.Down)
+  const creatorFeeBasisPoints =
+    feeType === FeeType.Creator
+      ? BigInt(config.creatorFeeBasisPoints)
+      : feeType === FeeType.Meme
+        ? BigInt(config.memeFeeBasisPoints)
+        : 0n
+
+  const creatorFee = safeMulDiv(amountIn, creatorFeeBasisPoints, FEE_DENOMINATOR, false)
 
   const hasReferral = hasL1Referral || hasL2Referral || hasL3Referral
   const effectiveFeeBasisPoints = hasReferral
-    ? configState.feeBasisPoints - configState.refereeDiscountBasisPoints
-    : configState.feeBasisPoints
+    ? BigInt(config.feeBasisPoints - config.refereeDiscountBasisPoints)
+    : BigInt(config.feeBasisPoints)
 
-  const totalFee = mulDiv(amountIn, BigInt(effectiveFeeBasisPoints), FEE_DENOMINATOR, Rounding.Down)
+  const totalFee = safeMulDiv(amountIn, effectiveFeeBasisPoints, FEE_DENOMINATOR, false)
 
-  const protocolFee = totalFee - l1ReferralFee - l2ReferralFee - l3ReferralFee - creatorFee - cashbackFee
-  const amount = amountIn - totalFee
+  const protocolFee = safeSub(
+    safeSub(safeSub(safeSub(safeSub(totalFee, l1ReferralFee), l2ReferralFee), l3ReferralFee), creatorFee),
+    cashbackFee,
+  )
+
+  const amount = safeSub(amountIn, totalFee)
 
   return {
     amount,
@@ -95,215 +150,50 @@ export function getFeeOnAmount(
   }
 }
 
-// Curve math functions
-export function getDeltaAmountQuoteUnsigned(
-  lowerSqrtPrice: bigint,
-  upperSqrtPrice: bigint,
-  liquidity: bigint,
-  rounding: Rounding,
-): bigint {
-  const deltaSqrtPrice = upperSqrtPrice - lowerSqrtPrice
-  const prod = liquidity * deltaSqrtPrice
-
-  if (rounding === Rounding.Up) {
-    const denominator = 1n << BigInt(RESOLUTION * 2)
-    return (prod + denominator - 1n) / denominator // ceiling division
-  }
-  return prod >> BigInt(RESOLUTION * 2)
-}
-
-export function getDeltaAmountBaseUnsigned(
-  lowerSqrtPrice: bigint,
-  upperSqrtPrice: bigint,
-  liquidity: bigint,
-  rounding: Rounding,
-): bigint {
-  const numerator1 = liquidity
-  const numerator2 = upperSqrtPrice - lowerSqrtPrice
-  const denominator = lowerSqrtPrice * upperSqrtPrice
-
-  return mulDiv(numerator1, numerator2, denominator, rounding)
-}
-
-export function getNextSqrtPriceFromInput(
-  sqrtPrice: bigint,
-  liquidity: bigint,
-  amountIn: bigint,
-  baseForQuote: boolean,
-): bigint {
-  if (baseForQuote) {
-    return getNextSqrtPriceFromAmountBaseRoundingUp(sqrtPrice, liquidity, amountIn)
-  }
-  return getNextSqrtPriceFromAmountQuoteRoundingDown(sqrtPrice, liquidity, amountIn)
-}
-
-function getNextSqrtPriceFromAmountBaseRoundingUp(sqrtPrice: bigint, liquidity: bigint, amount: bigint): bigint {
-  if (amount === 0n) {
-    return sqrtPrice
-  }
-
-  const product = amount * sqrtPrice
-  const denominator = liquidity + product
-  return mulDiv(liquidity, sqrtPrice, denominator, Rounding.Up)
-}
-
-function getNextSqrtPriceFromAmountQuoteRoundingDown(sqrtPrice: bigint, liquidity: bigint, amount: bigint): bigint {
-  const quotient = (amount << BigInt(RESOLUTION * 2)) / liquidity
-  return sqrtPrice + quotient
-}
-
-export function getSwapAmountFromBaseToQuote(
-  configState: Config,
-  currentSqrtPrice: bigint,
-  amountIn: bigint,
-): SwapAmount {
-  let totalOutputAmount = 0n
-  let sqrtPrice = currentSqrtPrice
-  let amountLeft = amountIn
-
-  // Iterate through curve points in reverse order (selling tokens)
-  for (let i = configState.curve.length - 2; i >= 0; i--) {
-    if (configState.curve[i].sqrtPrice === 0n || configState.curve[i].liquidity === 0n) {
-      continue
-    }
-
-    if (BigInt(configState.curve[i].sqrtPrice) < sqrtPrice) {
-      const maxAmountIn = getDeltaAmountBaseUnsigned(
-        BigInt(configState.curve[i].sqrtPrice),
-        sqrtPrice,
-        BigInt(configState.curve[i + 1].liquidity),
-        Rounding.Up,
-      )
-
-      if (amountLeft < maxAmountIn) {
-        const nextSqrtPrice = getNextSqrtPriceFromInput(
-          sqrtPrice,
-          BigInt(configState.curve[i + 1].liquidity),
-          amountLeft,
-          true,
-        )
-
-        const outputAmount = getDeltaAmountQuoteUnsigned(
-          nextSqrtPrice,
-          sqrtPrice,
-          BigInt(configState.curve[i + 1].liquidity),
-          Rounding.Down,
-        )
-
-        totalOutputAmount += outputAmount
-        sqrtPrice = nextSqrtPrice
-        amountLeft = 0n
-        break
-      }
-      const nextSqrtPrice = BigInt(configState.curve[i].sqrtPrice)
-      const outputAmount = getDeltaAmountQuoteUnsigned(
-        nextSqrtPrice,
-        sqrtPrice,
-        BigInt(configState.curve[i + 1].liquidity),
-        Rounding.Down,
-      )
-
-      totalOutputAmount += outputAmount
-      sqrtPrice = nextSqrtPrice
-      amountLeft -= maxAmountIn
-    }
-  }
-
-  if (amountLeft !== 0n) {
-    const nextSqrtPrice = getNextSqrtPriceFromInput(sqrtPrice, BigInt(configState.curve[0].liquidity), amountLeft, true)
-
-    const outputAmount = getDeltaAmountQuoteUnsigned(
-      nextSqrtPrice,
-      sqrtPrice,
-      BigInt(configState.curve[0].liquidity),
-      Rounding.Down,
-    )
-
-    totalOutputAmount += outputAmount
-    sqrtPrice = nextSqrtPrice
-  }
-
-  return {
-    outputAmount: totalOutputAmount,
-    nextSqrtPrice: sqrtPrice,
-  }
-}
-
-export function getSwapAmountFromQuoteToBase(
-  configState: Config,
-  currentSqrtPrice: bigint,
-  amountIn: bigint,
-): SwapAmount {
-  let totalOutputAmount = 0n
-  let sqrtPrice = currentSqrtPrice
-  let amountLeft = amountIn
-
-  // Iterate through curve points (buying tokens)
-  for (let i = 0; i < configState.curve.length; i++) {
-    if (configState.curve[i].sqrtPrice === 0n || configState.curve[i].liquidity === 0n) {
-      break
-    }
-
-    if (BigInt(configState.curve[i].sqrtPrice) > sqrtPrice) {
-      const maxAmountIn = getDeltaAmountQuoteUnsigned(
-        sqrtPrice,
-        BigInt(configState.curve[i].sqrtPrice),
-        BigInt(configState.curve[i].liquidity),
-        Rounding.Up,
-      )
-
-      if (amountLeft < maxAmountIn) {
-        const nextSqrtPrice = getNextSqrtPriceFromInput(
-          sqrtPrice,
-          BigInt(configState.curve[i].liquidity),
-          amountLeft,
-          false,
-        )
-
-        const outputAmount = getDeltaAmountBaseUnsigned(
-          sqrtPrice,
-          nextSqrtPrice,
-          BigInt(configState.curve[i].liquidity),
-          Rounding.Down,
-        )
-
-        totalOutputAmount += outputAmount
-        sqrtPrice = nextSqrtPrice
-        amountLeft = 0n
-        break
-      }
-      const nextSqrtPrice = BigInt(configState.curve[i].sqrtPrice)
-      const outputAmount = getDeltaAmountBaseUnsigned(
-        sqrtPrice,
-        nextSqrtPrice,
-        BigInt(configState.curve[i].liquidity),
-        Rounding.Down,
-      )
-
-      totalOutputAmount += outputAmount
-      sqrtPrice = nextSqrtPrice
-      amountLeft -= maxAmountIn
-    }
-  }
-
-  // Check max swallow amount (allow pool to consume extra amount)
-  const maxSwallowAmount = mulDiv(
-    BigInt(configState.migrationQuoteThreshold),
-    20n, // TODO: make this configurable
-    100n,
-    Rounding.Down,
+// Sum all fees in FeeBreakdown
+function sumFeeBreakdown(feeBreakdown: FeeBreakdown): bigint {
+  return safeAdd(
+    safeAdd(
+      safeAdd(
+        safeAdd(safeAdd(feeBreakdown.l1ReferralFee, feeBreakdown.l2ReferralFee), feeBreakdown.l3ReferralFee),
+        feeBreakdown.creatorFee,
+      ),
+      feeBreakdown.cashbackFee,
+    ),
+    feeBreakdown.protocolFee,
   )
-
-  if (amountLeft > maxSwallowAmount) {
-    throw new Error('SwapAmountIsOverAThreshold')
-  }
-
-  return {
-    outputAmount: totalOutputAmount,
-    nextSqrtPrice: sqrtPrice,
-  }
 }
 
+// Implements get_swap_amount_from_quote_to_base (aka buy)
+export function getSwapAmountFromQuoteToBase(virtualQuote: bigint, virtualBase: bigint, amountIn: bigint): bigint {
+  // Scale tokens for precision
+  // Assuming quote token has 9 decimals and base token has 6 decimals
+  const virtualBaseScaled = safeMul(virtualBase, 1000n)
+  const k = safeMul(virtualQuote, virtualBaseScaled)
+  const newVirtualQuote = safeAdd(virtualQuote, amountIn)
+  const newVirtualBaseScaled = safeDiv(k, newVirtualQuote)
+  const baseOutAmount = safeDiv(safeSub(virtualBaseScaled, newVirtualBaseScaled), 1000n)
+
+  return baseOutAmount
+}
+
+// Implements get_swap_amount_from_base_to_quote (aka sell)
+export function getSwapAmountFromBaseToQuote(virtualQuote: bigint, virtualBase: bigint, amountIn: bigint): bigint {
+  // Scale tokens for precision
+  // Assuming quote token has 9 decimals and base token has 6 decimals
+  const virtualBaseScaled = safeMul(virtualBase, 1000n)
+  const amountInScaled = safeMul(amountIn, 1000n)
+  const newVirtualBaseScaled = safeAdd(virtualBaseScaled, amountInScaled)
+
+  // Calculate using x*y=k
+  const k = safeMul(virtualBaseScaled, virtualQuote)
+  const newQuote = safeDiv(k, newVirtualBaseScaled)
+  const quoteOutAmount = safeSub(virtualQuote, newQuote)
+
+  return quoteOutAmount
+}
+
+// Implements BondingCurve::get_swap_result
 export function getSwapResult({
   curveState,
   configState,
@@ -331,15 +221,20 @@ export function getSwapResult({
   let creatorFee = 0n
   let cashbackFee = 0n
 
-  // Apply fees on input if needed
-  let actualAmountIn: bigint
+  // Determine fee type from curve state
+  const feeType = curveState.feeType as FeeType
+
+  let actualAmountIn = amountIn
+
   if (tradeDirection === TradeDirection.QuoteToBase) {
+    // Apply fees on input for buying
     const feeBreakdown = getFeeOnAmount(
       configState,
       amountIn,
       hasL1Referral,
       hasL2Referral,
       hasL3Referral,
+      feeType,
       cashbackTier,
     )
 
@@ -352,27 +247,64 @@ export function getSwapResult({
     cashbackFee = feeBreakdown.cashbackFee
 
     actualAmountIn = feeBreakdown.amount
-  } else {
-    actualAmountIn = amountIn
   }
 
-  // Calculate swap amount
-  const swapAmount: SwapAmount =
+  // Calculate swap output amount
+  const outputAmount =
     tradeDirection === TradeDirection.QuoteToBase
-      ? getSwapAmountFromQuoteToBase(configState, BigInt(curveState.sqrtPrice), actualAmountIn)
-      : getSwapAmountFromBaseToQuote(configState, BigInt(curveState.sqrtPrice), actualAmountIn)
+      ? getSwapAmountFromQuoteToBase(curveState.virtualQuoteReserve, curveState.virtualBaseReserve, actualAmountIn)
+      : getSwapAmountFromBaseToQuote(curveState.virtualQuoteReserve, curveState.virtualBaseReserve, actualAmountIn)
 
-  // Apply fees on output if needed
-  let actualAmountOut: bigint
+  let actualAmountOut = outputAmount
+
   if (tradeDirection === TradeDirection.QuoteToBase) {
-    actualAmountOut = swapAmount.outputAmount
+    // Check graduation threshold for buying
+    if (
+      outputAmount >= curveState.baseReserve ||
+      safeSub(curveState.baseReserve, outputAmount) < configState.migrationBaseThreshold
+    ) {
+      // Cap the output to leave migration threshold tokens
+      const newBaseOutputAmount = safeSub(curveState.baseReserve, configState.migrationBaseThreshold)
+      const newVirtualBase = safeSub(curveState.virtualBaseReserve, newBaseOutputAmount)
+
+      // Recalculate the capped input amount
+      const cappedAmountIn = getSwapAmountFromBaseToQuote(
+        configState.migrationQuoteThreshold,
+        newVirtualBase,
+        newBaseOutputAmount,
+      )
+
+      // Recalculate fees with capped amount
+      const feeBreakdown = getFeeOnAmount(
+        configState,
+        cappedAmountIn,
+        hasL1Referral,
+        hasL2Referral,
+        hasL3Referral,
+        feeType,
+        cashbackTier,
+      )
+
+      protocolFee = feeBreakdown.protocolFee
+      tradingFee = sumFeeBreakdown(feeBreakdown)
+      l1ReferralFee = feeBreakdown.l1ReferralFee
+      l2ReferralFee = feeBreakdown.l2ReferralFee
+      l3ReferralFee = feeBreakdown.l3ReferralFee
+      creatorFee = feeBreakdown.creatorFee
+      cashbackFee = feeBreakdown.cashbackFee
+      actualAmountIn = cappedAmountIn
+
+      actualAmountOut = newBaseOutputAmount
+    }
   } else {
+    // Apply fees on output for selling
     const feeBreakdown = getFeeOnAmount(
       configState,
-      swapAmount.outputAmount,
+      outputAmount,
       hasL1Referral,
       hasL2Referral,
       hasL3Referral,
+      feeType,
       cashbackTier,
     )
 
@@ -390,7 +322,6 @@ export function getSwapResult({
   return {
     actualInputAmount: actualAmountIn,
     outputAmount: actualAmountOut,
-    nextSqrtPrice: swapAmount.nextSqrtPrice,
     tradingFee,
     protocolFee,
     cashbackFee,

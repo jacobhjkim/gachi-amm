@@ -18,7 +18,7 @@ use crate::{
     },
     errors::AmmError,
     events::EvtInitializeCurve,
-    states::{BondingCurve, Config, CurveType, TokenType},
+    states::{BondingCurve, Config, CurveType, FeeType, TokenType},
     utils::{process_create_token_metadata, ProcessCreateTokenMetadataParams},
 };
 
@@ -227,6 +227,8 @@ pub fn handle_create_curve_spl_token(
     // init curve
     let mut curve = ctx.accounts.curve.load_init()?;
 
+    let fee_type = FeeType::try_from(params.fee_type).map_err(|_| AmmError::InvalidFeeType)?;
+
     curve.init(
         ctx.accounts.config.key(),
         ctx.accounts.creator.key(),
@@ -234,7 +236,7 @@ pub fn handle_create_curve_spl_token(
         ctx.accounts.base_vault.key(),
         ctx.accounts.quote_vault.key(),
         CurveType::SplToken.into(),
-        params.fee_type,
+        fee_type,
         initial_base_supply,
         config.initial_virtual_quote_reserve,
         config.initial_virtual_base_reserve,

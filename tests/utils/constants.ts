@@ -97,3 +97,4 @@ export const SEEDS = {
 export const DAMM_V2_PROGRAM_ID = address('cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG')
 export const DYNAMIC_BONDING_CURVE_PROGRAM_ID = address('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN')
 export const DAMM_CONFIG_ACCOUNT = address('AeLtDKgw3XnXbr3Kgfbcb7KiZULVCQ5mXaFDiG9n7EgW')
+export const METAPLEX_PROGRAM_ID = address('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')

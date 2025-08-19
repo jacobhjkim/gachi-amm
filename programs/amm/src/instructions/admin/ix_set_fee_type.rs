@@ -4,7 +4,7 @@ use crate::{
     assert_eq_fee_type_admin,
     errors::AmmError,
     events::EvtSetFeeType,
-    states::{BondingCurve, Config},
+    states::{BondingCurve, Config, FeeType},
 };
 
 /// Accounts for admin to review fee type
@@ -25,45 +25,54 @@ pub struct SetFeeTypeCtx<'info> {
     pub curve: AccountLoader<'info, BondingCurve>,
 }
 
-pub fn handle_set_fee_type(ctx: Context<SetFeeTypeCtx>, new_fee_type: u8) -> Result<()> {
+pub fn handle_set_fee_type(ctx: Context<SetFeeTypeCtx>, new_fee_type_raw: u8) -> Result<()> {
     let curve = &mut ctx.accounts.curve.load_mut()?;
     let config = &ctx.accounts.config.load()?;
 
-    // Check if the fee type is valid
-    require!(new_fee_type <= 2, AmmError::InvalidFeeType);
+    let new_fee_type = FeeType::try_from(new_fee_type_raw).map_err(|_| AmmError::InvalidFeeType)?;
 
-    require!(curve.fee_type != new_fee_type, AmmError::FeeTypeAlreadySet);
+    let current_fee_type = curve.get_fee_type()?;
+    require!(
+        current_fee_type != new_fee_type,
+        AmmError::FeeTypeAlreadySet
+    );
 
     // Set the fee type
-    if curve.fee_type == 0 && new_fee_type == 1 {
-        curve.fee_type_update_from_creator_to_meme(
-            config.creator_fee_basis_points,
-            config.meme_fee_basis_points,
-        )?;
-        emit_cpi!(EvtSetFeeType {
-            curve: ctx.accounts.curve.key(),
-            base_mint: curve.base_mint.key(),
-            old_fee_type: 0,
-            new_fee_type: 1,
-        });
-    } else if curve.fee_type == 1 && new_fee_type == 0 {
-        curve.fee_type_update_from_meme_to_creator()?;
-        emit_cpi!(EvtSetFeeType {
-            curve: ctx.accounts.curve.key(),
-            base_mint: curve.base_mint.key(),
-            old_fee_type: 1,
-            new_fee_type: 0,
-        });
-    } else if new_fee_type == 2 {
-        emit_cpi!(EvtSetFeeType {
-            curve: ctx.accounts.curve.key(),
-            base_mint: curve.base_mint.key(),
-            old_fee_type: curve.fee_type,
-            new_fee_type: 2,
-        });
-        curve.fee_type_update_to_blocked()?;
+    match (current_fee_type, new_fee_type) {
+        (FeeType::Creator, FeeType::Meme) => {
+            curve.fee_type_update_from_creator_to_meme(
+                config.creator_fee_basis_points,
+                config.meme_fee_basis_points,
+            )?;
+            emit_cpi!(EvtSetFeeType {
+                curve: ctx.accounts.curve.key(),
+                base_mint: curve.base_mint.key(),
+                old_fee_type: FeeType::Creator as u8,
+                new_fee_type: FeeType::Meme as u8,
+            });
+        }
+        (FeeType::Meme, FeeType::Creator) => {
+            curve.fee_type_update_from_meme_to_creator()?;
+            emit_cpi!(EvtSetFeeType {
+                curve: ctx.accounts.curve.key(),
+                base_mint: curve.base_mint.key(),
+                old_fee_type: FeeType::Meme as u8,
+                new_fee_type: FeeType::Creator as u8,
+            });
+        }
+        (_, FeeType::Blocked) => {
+            emit_cpi!(EvtSetFeeType {
+                curve: ctx.accounts.curve.key(),
+                base_mint: curve.base_mint.key(),
+                old_fee_type: current_fee_type as u8,
+                new_fee_type: FeeType::Blocked as u8,
+            });
+            curve.fee_type_update_to_blocked()?;
+        }
+        _ => {
+            return Err(AmmError::InvalidFeeType.into());
+        }
     }
 
-    // TODO: we do not allow
     Ok(())
 }

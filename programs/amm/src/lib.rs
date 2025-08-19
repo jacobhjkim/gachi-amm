@@ -14,7 +14,6 @@ pub mod instructions;
 pub use instructions::*;
 pub mod math;
 pub use math::*;
-pub mod curve;
 pub mod states;
 pub mod utils;
 

@@ -119,7 +119,7 @@ impl BondingCurve {
         base_vault: Pubkey,
         quote_vault: Pubkey,
         curve_type: u8,
-        fee_type: u8,
+        fee_type: FeeType,
         base_reserve: u64,
         virtual_quote_reserve: u64,
         virtual_base_reserve: u64,
@@ -130,7 +130,7 @@ impl BondingCurve {
         self.base_vault = base_vault;
         self.quote_vault = quote_vault;
         self.curve_type = curve_type;
-        self.fee_type = fee_type;
+        self.fee_type = fee_type as u8;
         self.fee_type_reviewed = 0; // default to not reviewed
         self.base_reserve = base_reserve;
         self.virtual_quote_reserve = virtual_quote_reserve;
@@ -310,6 +310,10 @@ impl BondingCurve {
         self.migration_status = status;
     }
 
+    pub fn get_fee_type(&self) -> Result<FeeType> {
+        FeeType::try_from(self.fee_type).map_err(|_| AmmError::TypeCastFailed.into())
+    }
+
     pub fn get_migration_progress(&self) -> Result<MigrationStatus> {
         let migration_progress = MigrationStatus::try_from(self.migration_status)
             .map_err(|_| AmmError::TypeCastFailed)?;
@@ -337,11 +341,16 @@ impl BondingCurve {
         creator_fee_basis_points: u16,
         meme_fee_basis_points: u16,
     ) -> Result<()> {
-        require!(self.fee_type == 0, AmmError::InvalidFeeType);
+        let current_fee_type =
+            FeeType::try_from(self.fee_type).map_err(|_| AmmError::TypeCastFailed)?;
+        require!(
+            current_fee_type == FeeType::Creator,
+            AmmError::InvalidFeeType
+        );
 
         if self.creator_fee == 0 {
             // Even if there's no creator fee, we still need to update the fee type
-            self.fee_type = 1; // update fee type to meme/community
+            self.fee_type = FeeType::Meme as u8; // update fee type to meme/community
             self.fee_type_reviewed = 1; // mark fee type as reviewed
             return Ok(());
         }
@@ -357,25 +366,32 @@ impl BondingCurve {
 
         // excess creator fee will be transferred to protocol fee
         self.protocol_fee += creator_fee_amount.safe_sub(new_creator_fee_amount)?;
-        self.fee_type = 1; // update fee type to meme/community
+        self.fee_type = FeeType::Meme as u8; // update fee type to meme/community
         self.fee_type_reviewed = 1; // mark fee type as reviewed
 
         Ok(())
     }
 
     pub fn fee_type_update_from_meme_to_creator(&mut self) -> Result<()> {
-        require!(self.fee_type == 1, AmmError::InvalidFeeType);
-        self.fee_type = 0; // update fee type to project/creator
+        let current_fee_type =
+            FeeType::try_from(self.fee_type).map_err(|_| AmmError::TypeCastFailed)?;
+        require!(current_fee_type == FeeType::Meme, AmmError::InvalidFeeType);
+        self.fee_type = FeeType::Creator as u8; // update fee type to project/creator
         self.fee_type_reviewed = 1; // mark fee type as reviewed
 
         Ok(())
     }
 
     pub fn fee_type_update_to_blocked(&mut self) -> Result<()> {
-        require!(self.fee_type != 2, AmmError::InvalidFeeType); // Can't block if already blocked
+        let current_fee_type =
+            FeeType::try_from(self.fee_type).map_err(|_| AmmError::TypeCastFailed)?;
+        require!(
+            current_fee_type != FeeType::Blocked,
+            AmmError::InvalidFeeType
+        ); // Can't block if already blocked
         self.protocol_fee += self.creator_fee; // transfer all creator fee to protocol fee
         self.creator_fee = 0; // reset creator fee to 0
-        self.fee_type = 2; // update fee type to blocked
+        self.fee_type = FeeType::Blocked as u8; // update fee type to blocked
         self.fee_type_reviewed = 1; // mark fee type as reviewed
 
         Ok(())

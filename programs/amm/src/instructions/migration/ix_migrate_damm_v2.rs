@@ -5,13 +5,12 @@ use anchor_spl::{
     token_interface::{TokenAccount, TokenInterface},
 };
 use damm_v2::types::InitializePoolParameters;
-use ruint::aliases::U512;
+use ruint::aliases::{U256, U512};
 use std::u64;
 
 use crate::{
     assert_eq_admin, const_pda,
     constants::{MAX_SQRT_PRICE, MIN_SQRT_PRICE},
-    curve::{get_initial_liquidity_from_delta_base, get_initial_liquidity_from_delta_quote},
     errors::AmmError,
     events::EvtMigrateDammV2,
     params::liquidity_distribution::get_sqrt_price_from_amounts,
@@ -368,4 +367,30 @@ fn get_liquidity_for_adding_liquidity(
             .try_into()
             .map_err(|_| AmmError::TypeCastFailed)?)
     }
+}
+
+// Δa = L * (1 / √P_lower - 1 / √P_upper) => L = Δa / (1 / √P_lower - 1 / √P_upper)
+fn get_initial_liquidity_from_delta_base(
+    base_amount: u64,
+    sqrt_max_price: u128,
+    sqrt_price: u128,
+) -> Result<U512> {
+    let price_delta = U512::from(sqrt_max_price.safe_sub(sqrt_price)?);
+    let prod = U512::from(base_amount)
+        .safe_mul(U512::from(sqrt_price))?
+        .safe_mul(U512::from(sqrt_max_price))?;
+    let liquidity = prod.safe_div(price_delta)?; // round down
+    Ok(liquidity)
+}
+
+// Δb = L (√P_upper - √P_lower) => L = Δb / (√P_upper - √P_lower)
+fn get_initial_liquidity_from_delta_quote(
+    quote_amount: u64,
+    sqrt_min_price: u128,
+    sqrt_price: u128,
+) -> Result<u128> {
+    let price_delta = U256::from(sqrt_price.safe_sub(sqrt_min_price)?);
+    let quote_amount = U256::from(quote_amount).safe_shl(128)?;
+    let liquidity = quote_amount.safe_div(price_delta)?; // round down
+    Ok(liquidity.try_into().map_err(|_| AmmError::TypeCastFailed)?)
 }

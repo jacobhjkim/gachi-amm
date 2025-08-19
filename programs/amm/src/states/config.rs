@@ -114,6 +114,7 @@ impl Config {
         l3_referral_fee_basis_points: u16,
         referee_discount_basis_points: u16,
         creator_fee_basis_points: u16,
+        meme_fee_basis_points: u16,
         migration_fee_basis_points: u16,
 
         /* Price configurations */
@@ -138,6 +139,7 @@ impl Config {
         self.l3_referral_fee_basis_points = l3_referral_fee_basis_points;
         self.referee_discount_basis_points = referee_discount_basis_points;
         self.creator_fee_basis_points = creator_fee_basis_points;
+        self.meme_fee_basis_points = meme_fee_basis_points;
         self.migration_fee_basis_points = migration_fee_basis_points;
 
         /* Price configurations */

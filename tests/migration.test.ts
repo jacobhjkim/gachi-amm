@@ -44,7 +44,7 @@ describe('Migration Test', () => {
 
     const migrationResult = await ctx.migrate({ curve, baseMint: token })
 
-    console.log(`\n=== After Migration ===`)
+    console.log('\n=== After Migration ===')
     const [postMigrationCurveState] = await Promise.all([fetchBondingCurve(ctx.rpc, curve)])
 
     expect(postMigrationCurveState.data.migrationStatus).toBe(2)
@@ -198,11 +198,11 @@ describe('Migration Test', () => {
     expect(postMigrationCurveState.data.migrationStatus).toBe(2)
 
     // Calculate the expected migration fee (5% of the quote amount)
-    const migrationQuoteThreshold = configState.data.migrationQuoteThreshold
     const migrationFeeBasisPoints = configState.data.migrationFeeBasisPoints
     const feeBasisPoints = configState.data.feeBasisPoints
     const feeAmount =
-      (migrationQuoteThreshold * (BigInt(migrationFeeBasisPoints) + BigInt(feeBasisPoints))) / BASIS_POINTS_DIVISOR
+      (preMigrationCurveState.data.quoteReserve * (BigInt(migrationFeeBasisPoints) + BigInt(feeBasisPoints))) /
+      BASIS_POINTS_DIVISOR
 
     console.log('migration fee basis points: ', migrationFeeBasisPoints)
     // The bonding curve should retain the migration fee (5%)
