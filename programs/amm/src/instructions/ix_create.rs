@@ -17,8 +17,7 @@ use crate::{
         MAX_NAME_LENGTH, MAX_SYMBOL_LENGTH, MAX_URI_LENGTH, TOKEN_TOTAL_SUPPLY,
     },
     errors::AmmError,
-    events::EvtInitializeCurve,
-    states::{BondingCurve, Config, CurveType, FeeType, TokenType},
+    states::{BondingCurve, Config, CurveType, TokenType},
     utils::{process_create_token_metadata, ProcessCreateTokenMetadataParams},
 };
 
@@ -227,8 +226,6 @@ pub fn handle_create_curve_spl_token(
     // init curve
     let mut curve = ctx.accounts.curve.load_init()?;
 
-    let fee_type = FeeType::try_from(params.fee_type).map_err(|_| AmmError::InvalidFeeType)?;
-
     curve.init(
         ctx.accounts.config.key(),
         ctx.accounts.creator.key(),
@@ -236,18 +233,17 @@ pub fn handle_create_curve_spl_token(
         ctx.accounts.base_vault.key(),
         ctx.accounts.quote_vault.key(),
         CurveType::SplToken.into(),
-        fee_type,
         initial_base_supply,
         config.initial_virtual_quote_reserve,
         config.initial_virtual_base_reserve,
     );
 
-    emit_cpi!(EvtInitializeCurve {
-        curve: ctx.accounts.curve.key(),
-        config: ctx.accounts.config.key(),
-        creator: ctx.accounts.creator.key(),
-        base_mint: ctx.accounts.base_mint.key(),
-        curve_type: CurveType::SplToken.into(),
-    });
+    emit_cpi!(curve.event(
+        ctx.accounts.curve.key(),
+        ctx.accounts.quote_mint.key(),
+        params.name,
+        params.symbol,
+        params.uri,
+    ));
     Ok(())
 }

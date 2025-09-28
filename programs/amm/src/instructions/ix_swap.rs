@@ -236,7 +236,6 @@ pub fn handle_swap(ctx: Context<SwapCtx>, params: SwapParameters) -> Result<()> 
         ctx.accounts.l3_referral_cashback_token_account.is_some(),
         cashback_tier,
     )?;
-    msg!("Swap result: {:?}", swap_result);
 
     require!(
         swap_result.output_amount >= minimum_amount_out,
@@ -337,19 +336,10 @@ pub fn handle_swap(ctx: Context<SwapCtx>, params: SwapParameters) -> Result<()> 
         has_referral,
     });
 
-    msg!("curve: {:?}", curve);
-
     if curve.is_curve_complete(config.migration_base_threshold) {
         ctx.accounts.base_vault.reload()?;
         // validate if base reserve is enough token for migration
         let base_vault_balance = ctx.accounts.base_vault.amount;
-
-        msg!("Base vault balance: {}", base_vault_balance);
-        msg!(
-            "Migration base threshold: {}",
-            config.migration_base_threshold
-        );
-
         require!(
             base_vault_balance >= config.migration_base_threshold,
             AmmError::InsufficientLiquidityForMigration
@@ -363,6 +353,7 @@ pub fn handle_swap(ctx: Context<SwapCtx>, params: SwapParameters) -> Result<()> 
         emit_cpi!(EvtCurveComplete {
             curve: ctx.accounts.curve.key(),
             config: ctx.accounts.config.key(),
+            base_mint: ctx.accounts.base_mint.key(),
             base_reserve: curve.base_reserve,
             quote_reserve: curve.quote_reserve,
         })

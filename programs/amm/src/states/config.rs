@@ -1,7 +1,6 @@
 use anchor_lang::prelude::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
-use crate::states::FeeType;
 use crate::{
     constants::fee::FEE_DENOMINATOR,
     events::EvtCreateConfig,
@@ -61,8 +60,8 @@ pub struct Config {
     pub base_decimal: u8,
     /// quote token decimal, (6 | 9)
     pub quote_decimal: u8,
-    /// padding 1  
-    pub _padding_1: [u8; 4],
+    /// padding 1
+    _padding_1: [u8; 4],
 
     /* Fee configurations */
     /// Trading fee in bps
@@ -75,12 +74,12 @@ pub struct Config {
     pub l3_referral_fee_basis_points: u16,
     /// Referee discount fee in bps (if the user has a referral, they will get this discount)
     pub referee_discount_basis_points: u16,
-    /// creator/project fee in bps
+    /// creator fee in bps
     pub creator_fee_basis_points: u16,
-    /// meme/community fee in bps
-    pub meme_fee_basis_points: u16,
     /// migration fee in bps (quote token fee)
     pub migration_fee_basis_points: u16,
+    /// padding 2
+    _padding_2: [u16; 1],
 
     /* Price configurations */
     /// migration base threshold (the amount of token to migrate)
@@ -91,8 +90,8 @@ pub struct Config {
     pub initial_virtual_quote_reserve: u64,
     /// initial virtual base reserve to boost the initial liquidity
     pub initial_virtual_base_reserve: u64,
-    /// for future use
-    pub _padding_3: [u64; 4],
+    /// padding, but we can also use them for future uses.
+    _padding_3: [u64; 4],
 }
 
 impl Config {
@@ -114,7 +113,6 @@ impl Config {
         l3_referral_fee_basis_points: u16,
         referee_discount_basis_points: u16,
         creator_fee_basis_points: u16,
-        meme_fee_basis_points: u16,
         migration_fee_basis_points: u16,
 
         /* Price configurations */
@@ -139,7 +137,6 @@ impl Config {
         self.l3_referral_fee_basis_points = l3_referral_fee_basis_points;
         self.referee_discount_basis_points = referee_discount_basis_points;
         self.creator_fee_basis_points = creator_fee_basis_points;
-        self.meme_fee_basis_points = meme_fee_basis_points;
         self.migration_fee_basis_points = migration_fee_basis_points;
 
         /* Price configurations */
@@ -183,7 +180,6 @@ impl Config {
         has_l1_referral: bool,
         has_l2_referral: bool,
         has_l3_referral: bool,
-        fee_type: FeeType,
         cashback_tier: Option<CashbackTier>,
     ) -> Result<FeeBreakdown> {
         let l1_referral_fee = if has_l1_referral {
@@ -229,17 +225,9 @@ impl Config {
             Rounding::Down,
         )?;
 
-        let creator_fee_basis_points = if fee_type == FeeType::Creator {
-            self.creator_fee_basis_points
-        } else if fee_type == FeeType::Meme {
-            self.meme_fee_basis_points
-        } else {
-            0u16
-        };
-
         let creator_fee: u64 = safe_mul_div_cast_u64(
             amount_in,
-            creator_fee_basis_points as u64,
+            self.creator_fee_basis_points as u64,
             FEE_DENOMINATOR,
             Rounding::Down,
         )?;

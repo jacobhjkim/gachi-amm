@@ -66,7 +66,7 @@ pub fn handle_claim_creator_fee(ctx: Context<ClaimCreatorFeeCtx>) -> Result<()> 
         const_pda::curve_authority::BUMP,
     )?;
 
-    emit!(EvtClaimCreatorTradingFee {
+    emit_cpi!(EvtClaimCreatorTradingFee {
         curve: ctx.accounts.curve.key(),
         creator: ctx.accounts.creator.key(),
         quote_token_claim_amount,

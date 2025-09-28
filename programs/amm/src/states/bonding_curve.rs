@@ -9,6 +9,7 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use crate::events::EvtInitializeCurve;
 
 /// Represents the result of checking graduation status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,23 +53,6 @@ pub enum MigrationStatus {
     CreatedPool,
 }
 
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    IntoPrimitive,
-    TryFromPrimitive,
-    AnchorDeserialize,
-    AnchorSerialize,
-)]
-pub enum FeeType {
-    Creator,
-    Meme,
-    Blocked,
-}
-
 #[account(zero_copy)]
 #[derive(InitSpace, Debug, Default)]
 pub struct BondingCurve {
@@ -92,16 +76,12 @@ pub struct BondingCurve {
     pub virtual_quote_reserve: u64,
     /// curve type, spl token or token2022
     pub curve_type: u8,
-    /// fee type, (0: project/creator, 1: meme/community, 2: blocked)
-    pub fee_type: u8,
-    /// if the curve's fee_type has been reviewed by the admins. (0: not reviewed, 1: reviewed)
-    pub fee_type_reviewed: u8,
     /// is migrated
     pub is_migrated: u8,
     /// migration status enum (0: PreBondingCurve, 1: PostBondingCurve, 2: CreatedPool)
     pub migration_status: u8,
     /// padding 1
-    pub _padding_1: [u8; 3],
+    pub _padding_1: [u8; 5],
     /// The time curve is finished
     pub curve_finish_timestamp: u64,
     /// The protocol fee
@@ -119,7 +99,6 @@ impl BondingCurve {
         base_vault: Pubkey,
         quote_vault: Pubkey,
         curve_type: u8,
-        fee_type: FeeType,
         base_reserve: u64,
         virtual_quote_reserve: u64,
         virtual_base_reserve: u64,
@@ -130,8 +109,6 @@ impl BondingCurve {
         self.base_vault = base_vault;
         self.quote_vault = quote_vault;
         self.curve_type = curve_type;
-        self.fee_type = fee_type as u8;
-        self.fee_type_reviewed = 0; // default to not reviewed
         self.base_reserve = base_reserve;
         self.virtual_quote_reserve = virtual_quote_reserve;
         self.virtual_base_reserve = virtual_base_reserve;
@@ -154,7 +131,6 @@ impl BondingCurve {
         let mut l3_referral_fee = 0u64;
         let mut creator_fee = 0u64;
         let mut cashback_fee = 0u64;
-        let fee_type = FeeType::try_from(self.fee_type).map_err(|_| AmmError::TypeCastFailed)?;
 
         let mut actual_amount_in = if trade_direction == TradeDirection::QuoteToBase {
             let fee_breakdown = config.get_fee_on_amount(
@@ -162,7 +138,6 @@ impl BondingCurve {
                 has_l1_referral,
                 has_l2_referral,
                 has_l3_referral,
-                fee_type,
                 cashback_tier,
             )?;
 
@@ -215,7 +190,6 @@ impl BondingCurve {
                     has_l1_referral,
                     has_l2_referral,
                     has_l3_referral,
-                    fee_type,
                     cashback_tier,
                 )?;
 
@@ -238,7 +212,6 @@ impl BondingCurve {
                 has_l1_referral,
                 has_l2_referral,
                 has_l3_referral,
-                fee_type,
                 cashback_tier,
             )?;
 
@@ -310,10 +283,6 @@ impl BondingCurve {
         self.migration_status = status;
     }
 
-    pub fn get_fee_type(&self) -> Result<FeeType> {
-        FeeType::try_from(self.fee_type).map_err(|_| AmmError::TypeCastFailed.into())
-    }
-
     pub fn get_migration_progress(&self) -> Result<MigrationStatus> {
         let migration_progress = MigrationStatus::try_from(self.migration_status)
             .map_err(|_| AmmError::TypeCastFailed)?;
@@ -336,67 +305,6 @@ impl BondingCurve {
         claim_amount
     }
 
-    pub fn fee_type_update_from_creator_to_meme(
-        &mut self,
-        creator_fee_basis_points: u16,
-        meme_fee_basis_points: u16,
-    ) -> Result<()> {
-        let current_fee_type =
-            FeeType::try_from(self.fee_type).map_err(|_| AmmError::TypeCastFailed)?;
-        require!(
-            current_fee_type == FeeType::Creator,
-            AmmError::InvalidFeeType
-        );
-
-        if self.creator_fee == 0 {
-            // Even if there's no creator fee, we still need to update the fee type
-            self.fee_type = FeeType::Meme as u8; // update fee type to meme/community
-            self.fee_type_reviewed = 1; // mark fee type as reviewed
-            return Ok(());
-        }
-
-        require!(
-            creator_fee_basis_points >= meme_fee_basis_points,
-            AmmError::InvalidCreatorTradingFeePercentage
-        );
-        let creator_fee_amount = self.creator_fee;
-        let fee_ratio = creator_fee_basis_points.safe_div(meme_fee_basis_points)?;
-        let new_creator_fee_amount = creator_fee_amount.safe_div(fee_ratio as u64)?;
-        self.creator_fee = new_creator_fee_amount;
-
-        // excess creator fee will be transferred to protocol fee
-        self.protocol_fee += creator_fee_amount.safe_sub(new_creator_fee_amount)?;
-        self.fee_type = FeeType::Meme as u8; // update fee type to meme/community
-        self.fee_type_reviewed = 1; // mark fee type as reviewed
-
-        Ok(())
-    }
-
-    pub fn fee_type_update_from_meme_to_creator(&mut self) -> Result<()> {
-        let current_fee_type =
-            FeeType::try_from(self.fee_type).map_err(|_| AmmError::TypeCastFailed)?;
-        require!(current_fee_type == FeeType::Meme, AmmError::InvalidFeeType);
-        self.fee_type = FeeType::Creator as u8; // update fee type to project/creator
-        self.fee_type_reviewed = 1; // mark fee type as reviewed
-
-        Ok(())
-    }
-
-    pub fn fee_type_update_to_blocked(&mut self) -> Result<()> {
-        let current_fee_type =
-            FeeType::try_from(self.fee_type).map_err(|_| AmmError::TypeCastFailed)?;
-        require!(
-            current_fee_type != FeeType::Blocked,
-            AmmError::InvalidFeeType
-        ); // Can't block if already blocked
-        self.protocol_fee += self.creator_fee; // transfer all creator fee to protocol fee
-        self.creator_fee = 0; // reset creator fee to 0
-        self.fee_type = FeeType::Blocked as u8; // update fee type to blocked
-        self.fee_type_reviewed = 1; // mark fee type as reviewed
-
-        Ok(())
-    }
-
     pub fn get_migration_amount(&self, migration_fee_basis_points: u16) -> Result<MigrationAmount> {
         let quote_amount: u64 = safe_mul_div_cast_u64(
             self.quote_reserve,
@@ -414,6 +322,27 @@ impl BondingCurve {
             quote_amount,
             base_amount,
         })
+    }
+
+    pub fn event(
+        &self,
+        curve_key: Pubkey,
+        quote_mint: Pubkey,
+        name: String,
+        symbol: String,
+        uri: String,
+    ) -> EvtInitializeCurve {
+        EvtInitializeCurve {
+            curve: curve_key.key(),
+            config: self.config,
+            creator: self.creator,
+            base_mint: self.base_mint,
+            quote_mint: quote_mint.key(),
+            curve_type: self.curve_type,
+            name,
+            symbol,
+            uri,
+        }
     }
 }
 

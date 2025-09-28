@@ -34,10 +34,8 @@ pub struct ConfigParameters {
     pub l3_referral_fee_basis_points: u16,
     /// Referee discount in bps
     pub referee_discount_basis_points: u16,
-    /// creator/project fee in bps
+    /// creator fee in bps
     pub creator_fee_basis_points: u16,
-    /// meme/community fee in bps
-    pub meme_fee_basis_points: u16,
     /// migration fee in bps (quote token fee)
     pub migration_fee_basis_points: u16,
 
@@ -180,7 +178,6 @@ pub fn handle_create_config(
         config_params.l3_referral_fee_basis_points,
         config_params.referee_discount_basis_points,
         config_params.creator_fee_basis_points,
-        config_params.meme_fee_basis_points,
         config_params.migration_fee_basis_points,
         /* Price configurations */
         config_params.migration_base_threshold,

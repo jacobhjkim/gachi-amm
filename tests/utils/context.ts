@@ -1,5 +1,5 @@
 import { expect } from 'bun:test'
-import { AccountRole, type Signature, pipe, prependTransactionMessageInstructions } from '@solana/kit'
+import { AccountRole, pipe, prependTransactionMessageInstructions } from '@solana/kit'
 import {
   type Address,
   type KeyPairSigner,
@@ -464,6 +464,7 @@ export class TestContextClass {
       cashbackAccount: cashbackPda,
       user,
       newTier,
+      program: this.programId,
     })
 
     const { value: latestBlockhash } = await this.rpc.getLatestBlockhash().send()
@@ -496,6 +497,7 @@ export class TestContextClass {
       cashbackAccount: cashbackPda,
       wsolMint: WSOL_MINT,
       userWsolAccount: userWsolAccount,
+      program: this.programId,
     })
 
     const { value: latestBlockhash } = await this.rpc.getLatestBlockhash().send()
@@ -1115,51 +1117,5 @@ export class TestContextClass {
 
   async getCurveData({ curveAddress }: { curveAddress: Address }) {
     return await fetchBondingCurve(this.rpc, curveAddress)
-  }
-
-  async setFeeType({
-    curveAddress,
-    configAddress,
-    newFeeType,
-    payer,
-  }: {
-    curveAddress: Address
-    configAddress: Address
-    newFeeType: number
-    payer?: KeyPairSigner
-  }): Promise<Signature> {
-    const { getSetFeeTypeInstructionAsync } = await import('~/clients')
-
-    const signer = payer || this.owner
-
-    const setFeeTypeIx = await getSetFeeTypeInstructionAsync({
-      payer: signer,
-      config: configAddress,
-      curve: curveAddress,
-      program: this.programId,
-      newFeeType,
-    })
-
-    const { value: latestBlockhash } = await this.rpc.getLatestBlockhash().send()
-    const tx = pipe(
-      createTransactionMessage({ version: 0 }),
-      (tx) => appendTransactionMessageInstructions([setFeeTypeIx], tx),
-      (tx) => setTransactionMessageFeePayerSigner(signer, tx),
-      (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
-    )
-    const signedTx = await signTransactionMessageWithSigners(tx)
-    const signature = await this.sendAndConfirmTransaction(signedTx)
-
-    if (this.network === 'devnet') {
-      console.log(
-        'Explorer (set-fee-type):',
-        getExplorerLink({
-          cluster: 'devnet',
-          transaction: signature,
-        }),
-      )
-    }
-
-    return signature
   }
 }

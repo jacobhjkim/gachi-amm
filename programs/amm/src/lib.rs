@@ -132,15 +132,4 @@ pub mod amm {
     pub fn claim_creator_fee(ctx: Context<ClaimCreatorFeeCtx>) -> Result<()> {
         handle_claim_creator_fee(ctx)
     }
-
-    /// Set the fee type for the bonding curve
-    ///
-    /// # Arguments
-    ///
-    /// * `ctx` - The accounts needed by the instruction.
-    /// * `new_fee_type` - The new fee type to set (0 for creator, 1 for meme, 2 for blocked).
-    ///
-    pub fn set_fee_type(ctx: Context<SetFeeTypeCtx>, new_fee_type: u8) -> Result<()> {
-        handle_set_fee_type(ctx, new_fee_type)
-    }
 }

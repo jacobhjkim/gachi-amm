@@ -12,7 +12,9 @@ use crate::{
     errors::AmmError,
     states::CashbackAccount,
 };
+use crate::events::EvtClaimCashback;
 
+#[event_cpi]
 #[derive(Accounts)]
 pub struct ClaimCashback<'info> {
     #[account(mut)]
@@ -99,6 +101,11 @@ pub fn handle_claim_cashback(ctx: Context<ClaimCashback>) -> Result<()> {
 
     // Update last claim timestamp
     cashback_account.update_claim_timestamp()?;
+
+    emit_cpi!(EvtClaimCashback {
+        owner: user_key,
+        wsol_claim_amount: wsol_claimable,
+    });
 
     Ok(())
 }

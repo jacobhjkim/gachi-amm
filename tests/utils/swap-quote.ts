@@ -6,12 +6,6 @@ export enum TradeDirection {
   QuoteToBase = 1,
 }
 
-export enum FeeType {
-  Creator = 0,
-  Meme = 1,
-  Blocked = 2,
-}
-
 export interface FeeBreakdown {
   amount: bigint
   l1ReferralFee: bigint
@@ -98,7 +92,6 @@ export function getFeeOnAmount(
   hasL1Referral: boolean,
   hasL2Referral: boolean,
   hasL3Referral: boolean,
-  feeType: FeeType,
   cashbackTier?: number,
 ): FeeBreakdown {
   const l1ReferralFee = hasL1Referral
@@ -115,15 +108,7 @@ export function getFeeOnAmount(
 
   const cashbackBps = getCashbackBps(cashbackTier)
   const cashbackFee = safeMulDiv(amountIn, cashbackBps, FEE_DENOMINATOR, false)
-
-  const creatorFeeBasisPoints =
-    feeType === FeeType.Creator
-      ? BigInt(config.creatorFeeBasisPoints)
-      : feeType === FeeType.Meme
-        ? BigInt(config.memeFeeBasisPoints)
-        : 0n
-
-  const creatorFee = safeMulDiv(amountIn, creatorFeeBasisPoints, FEE_DENOMINATOR, false)
+  const creatorFee = safeMulDiv(amountIn, BigInt(config.creatorFeeBasisPoints), FEE_DENOMINATOR, false)
 
   const hasReferral = hasL1Referral || hasL2Referral || hasL3Referral
   const effectiveFeeBasisPoints = hasReferral
@@ -221,9 +206,6 @@ export function getSwapResult({
   let creatorFee = 0n
   let cashbackFee = 0n
 
-  // Determine fee type from curve state
-  const feeType = curveState.feeType as FeeType
-
   let actualAmountIn = amountIn
 
   if (tradeDirection === TradeDirection.QuoteToBase) {
@@ -234,7 +216,6 @@ export function getSwapResult({
       hasL1Referral,
       hasL2Referral,
       hasL3Referral,
-      feeType,
       cashbackTier,
     )
 
@@ -281,7 +262,6 @@ export function getSwapResult({
         hasL1Referral,
         hasL2Referral,
         hasL3Referral,
-        feeType,
         cashbackTier,
       )
 
@@ -304,7 +284,6 @@ export function getSwapResult({
       hasL1Referral,
       hasL2Referral,
       hasL3Referral,
-      feeType,
       cashbackTier,
     )
 

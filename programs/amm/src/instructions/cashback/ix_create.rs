@@ -1,4 +1,3 @@
-use crate::{constants::seeds::CASHBACK_PREFIX, states::CashbackAccount};
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
@@ -6,6 +5,8 @@ use anchor_spl::{
         Mint as MintInterface, TokenAccount as TokenAccountInterface, TokenInterface,
     },
 };
+
+use crate::{constants::seeds::CASHBACK_PREFIX, states::CashbackAccount, events::EvtCreateCashback};
 
 #[event_cpi]
 #[derive(Accounts)]
@@ -50,6 +51,10 @@ pub fn handle_create_cashback(ctx: Context<CreateCashback>) -> Result<()> {
     let mut cashback_account = ctx.accounts.cashback_account.load_init()?;
     cashback_account.init(ctx.accounts.payer.key())?;
 
-    // TODO: emit cpi event
+    emit_cpi!(EvtCreateCashback {
+        owner: ctx.accounts.payer.key(),
+        tier: cashback_account.current_tier,
+    });
+
     Ok(())
 }

@@ -12,7 +12,6 @@ export const L1_REFERRAL_FEE_BASIS_POINTS = 300
 export const L2_REFERRAL_FEE_BASIS_POINTS = 30
 export const L3_REFERRAL_FEE_BASIS_POINTS = 20
 export const CREATOR_FEE_BASIS_POINTS = 500 // 0.5% of sol amount
-export const MEME_FEE_BASIS_POINTS = 100 // 0.1% of sol amount for meme token
 export const MIGRATION_FEE_BASIS_POINTS = 5_000 // 5% of quote amount
 
 export const DEFAULT_CONFIG_ARGS = {
@@ -24,7 +23,6 @@ export const DEFAULT_CONFIG_ARGS = {
   l3ReferralFeeBasisPoints: L3_REFERRAL_FEE_BASIS_POINTS,
   refereeDiscountBasisPoints: REFEREE_DISCOUNT_BASIS_POINTS,
   creatorFeeBasisPoints: CREATOR_FEE_BASIS_POINTS,
-  memeFeeBasisPoints: MEME_FEE_BASIS_POINTS,
   migrationFeeBasisPoints: MIGRATION_FEE_BASIS_POINTS,
   /* price configs */
   migrationBaseThreshold: 200_000_000_000_000n, // 20% of the supply

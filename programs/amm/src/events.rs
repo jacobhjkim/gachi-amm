@@ -35,7 +35,11 @@ pub struct EvtInitializeCurve {
     pub config: Pubkey,
     pub creator: Pubkey,
     pub base_mint: Pubkey,
+    pub quote_mint: Pubkey,
     pub curve_type: u8,
+    pub name: String,
+    pub symbol: String,
+    pub uri: String,
 }
 
 #[event]
@@ -52,6 +56,7 @@ pub struct EvtSwap {
 pub struct EvtCurveComplete {
     pub curve: Pubkey,
     pub config: Pubkey,
+    pub base_mint: Pubkey,
     pub base_reserve: u64,
     pub quote_reserve: u64,
 }
@@ -83,9 +88,20 @@ pub struct EvtClaimCreatorTradingFee {
 }
 
 #[event]
-pub struct EvtSetFeeType {
-    pub curve: Pubkey,
-    pub base_mint: Pubkey,
-    pub old_fee_type: u8,
-    pub new_fee_type: u8,
+pub struct EvtCreateCashback {
+    pub owner: Pubkey,
+    pub tier: u8,
+}
+
+#[event]
+pub struct EvtClaimCashback {
+    pub owner: Pubkey,
+    pub wsol_claim_amount: u64,
+}
+
+#[event]
+pub struct EvtUpdateCashbackTier {
+    pub owner: Pubkey,
+    pub old_tier: u8,
+    pub new_tier: u8,
 }

@@ -63,12 +63,6 @@ const expectBondingCurveValues = (
   if (expected.protocolFee !== undefined) {
     expect(bondingCurve.data.protocolFee).toEqual(expected.protocolFee)
   }
-  if (expected.feeType !== undefined) {
-    expect(bondingCurve.data.feeType).toEqual(expected.feeType)
-  }
-  if (expected.feeTypeReviewed !== undefined) {
-    expect(bondingCurve.data.feeTypeReviewed).toEqual(expected.feeTypeReviewed)
-  }
 }
 
 describe('Bonding Curve Creation Tests', () => {
@@ -158,8 +152,6 @@ describe('Bonding Curve Creation Tests', () => {
       curveFinishTimestamp: 0n,
       creatorFee: 0n, // No fee for initial mint
       protocolFee: 0n, // No fee for initial mint
-      feeType: 0,
-      feeTypeReviewed: 0,
     })
 
     await verifyTokenMint(mintKeypair.address, {
