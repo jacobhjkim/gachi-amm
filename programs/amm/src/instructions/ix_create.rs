@@ -29,8 +29,6 @@ pub struct CreateCurveParams {
     pub symbol: String,
     /// URI for the token metadata
     pub uri: String,
-    /// 0: project/creator, 1: meme/community, 2: blocked
-    pub fee_type: u8,
 }
 
 impl CreateCurveParams {
@@ -47,7 +45,6 @@ impl CreateCurveParams {
             self.uri.len() <= MAX_URI_LENGTH && !self.uri.is_empty(),
             AmmError::InvalidTokenUri
         );
-        require!(self.fee_type <= 2, AmmError::InvalidAmmConfig);
         Ok(())
     }
 }

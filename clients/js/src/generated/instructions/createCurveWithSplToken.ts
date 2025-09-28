@@ -20,8 +20,6 @@ import {
   getStructEncoder,
   getU32Decoder,
   getU32Encoder,
-  getU8Decoder,
-  getU8Encoder,
   getUtf8Decoder,
   getUtf8Encoder,
   transformEncoder,
@@ -146,8 +144,6 @@ export type CreateCurveWithSplTokenInstructionData = {
   symbol: string;
   /** URI for the token metadata */
   uri: string;
-  /** 0: project/creator, 1: meme/community, 2: blocked */
-  feeType: number;
 };
 
 export type CreateCurveWithSplTokenInstructionDataArgs = {
@@ -157,8 +153,6 @@ export type CreateCurveWithSplTokenInstructionDataArgs = {
   symbol: string;
   /** URI for the token metadata */
   uri: string;
-  /** 0: project/creator, 1: meme/community, 2: blocked */
-  feeType: number;
 };
 
 export function getCreateCurveWithSplTokenInstructionDataEncoder(): Encoder<CreateCurveWithSplTokenInstructionDataArgs> {
@@ -168,7 +162,6 @@ export function getCreateCurveWithSplTokenInstructionDataEncoder(): Encoder<Crea
       ['name', addEncoderSizePrefix(getUtf8Encoder(), getU32Encoder())],
       ['symbol', addEncoderSizePrefix(getUtf8Encoder(), getU32Encoder())],
       ['uri', addEncoderSizePrefix(getUtf8Encoder(), getU32Encoder())],
-      ['feeType', getU8Encoder()],
     ]),
     (value) => ({
       ...value,
@@ -183,7 +176,6 @@ export function getCreateCurveWithSplTokenInstructionDataDecoder(): Decoder<Crea
     ['name', addDecoderSizePrefix(getUtf8Decoder(), getU32Decoder())],
     ['symbol', addDecoderSizePrefix(getUtf8Decoder(), getU32Decoder())],
     ['uri', addDecoderSizePrefix(getUtf8Decoder(), getU32Decoder())],
-    ['feeType', getU8Decoder()],
   ]);
 }
 
@@ -238,7 +230,6 @@ export type CreateCurveWithSplTokenAsyncInput<
   name: CreateCurveWithSplTokenInstructionDataArgs['name'];
   symbol: CreateCurveWithSplTokenInstructionDataArgs['symbol'];
   uri: CreateCurveWithSplTokenInstructionDataArgs['uri'];
-  feeType: CreateCurveWithSplTokenInstructionDataArgs['feeType'];
 };
 
 export async function getCreateCurveWithSplTokenInstructionAsync<
@@ -471,7 +462,6 @@ export type CreateCurveWithSplTokenInput<
   name: CreateCurveWithSplTokenInstructionDataArgs['name'];
   symbol: CreateCurveWithSplTokenInstructionDataArgs['symbol'];
   uri: CreateCurveWithSplTokenInstructionDataArgs['uri'];
-  feeType: CreateCurveWithSplTokenInstructionDataArgs['feeType'];
 };
 
 export function getCreateCurveWithSplTokenInstruction<

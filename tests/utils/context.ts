@@ -257,7 +257,7 @@ export class TestContextClass {
   }
 
   /******************************* Curve functions *******************************/
-  async createFreshBondingCurve(configAddress?: Address, creator?: KeyPairSigner, feeType?: number) {
+  async createFreshBondingCurve(configAddress?: Address, creator?: KeyPairSigner) {
     const config = configAddress
       ? configAddress
       : this.currentConfig || (await this.createConfig(DEFAULT_CONFIG_ARGS)).configAddress
@@ -267,7 +267,6 @@ export class TestContextClass {
       configAddress: config,
       creator: creatorSigner,
       mintKeypair,
-      feeType: feeType ?? 0,
     })
 
     return {
@@ -280,14 +279,12 @@ export class TestContextClass {
     configAddress,
     creator,
     mintKeypair,
-    feeType = 0,
     quoteMintAddress = WSOL_MINT,
     tokenMetadata,
   }: {
     configAddress: Address
     creator: KeyPairSigner
     mintKeypair: KeyPairSigner
-    feeType?: number
     quoteMintAddress?: Address
     tokenMetadata?: {
       name: string
@@ -315,7 +312,6 @@ export class TestContextClass {
       name: tokenMetadata?.name ?? DEFAULT_TOKEN.name,
       symbol: tokenMetadata?.symbol ?? DEFAULT_TOKEN.symbol,
       uri: tokenMetadata?.uri ?? DEFAULT_TOKEN.uri,
-      feeType,
     })
 
     const { value: latestBlockhash } = await this.rpc.getLatestBlockhash().send()
