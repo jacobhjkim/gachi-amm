@@ -327,13 +327,28 @@ pub fn handle_swap(ctx: Context<SwapCtx>, params: SwapParameters) -> Result<()> 
         )?;
     }
 
+    // Reload the user's base token account to get updated balance
+    let user_base_token_account = match trade_direction {
+        TradeDirection::BaseToQuote => {
+            ctx.accounts.input_token_account.reload()?;
+            &ctx.accounts.input_token_account
+        }
+        TradeDirection::QuoteToBase => {
+            ctx.accounts.output_token_account.reload()?;
+            &ctx.accounts.output_token_account
+        }
+    };
+
     emit_cpi!(EvtSwap {
         curve: ctx.accounts.curve.key(),
         base_mint: ctx.accounts.base_mint.key(),
         trade_direction: trade_direction.into(),
+        has_referral,
         params,
         swap_result,
-        has_referral,
+        virtual_base_reserve: curve.virtual_base_reserve,
+        virtual_quote_reserve: curve.virtual_quote_reserve,
+        remaining_tokens: user_base_token_account.amount,
     });
 
     if curve.is_curve_complete(config.migration_base_threshold) {

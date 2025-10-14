@@ -14,6 +14,8 @@ import {
   getBooleanEncoder,
   getStructDecoder,
   getStructEncoder,
+  getU64Decoder,
+  getU64Encoder,
   getU8Decoder,
   getU8Encoder,
   type Address,
@@ -39,6 +41,9 @@ export type EvtSwap = {
   hasReferral: boolean;
   params: SwapParameters;
   swapResult: SwapResult;
+  virtualBaseReserve: bigint;
+  virtualQuoteReserve: bigint;
+  remainingTokens: bigint;
 };
 
 export type EvtSwapArgs = {
@@ -48,6 +53,9 @@ export type EvtSwapArgs = {
   hasReferral: boolean;
   params: SwapParametersArgs;
   swapResult: SwapResultArgs;
+  virtualBaseReserve: number | bigint;
+  virtualQuoteReserve: number | bigint;
+  remainingTokens: number | bigint;
 };
 
 export function getEvtSwapEncoder(): FixedSizeEncoder<EvtSwapArgs> {
@@ -58,6 +66,9 @@ export function getEvtSwapEncoder(): FixedSizeEncoder<EvtSwapArgs> {
     ['hasReferral', getBooleanEncoder()],
     ['params', getSwapParametersEncoder()],
     ['swapResult', getSwapResultEncoder()],
+    ['virtualBaseReserve', getU64Encoder()],
+    ['virtualQuoteReserve', getU64Encoder()],
+    ['remainingTokens', getU64Encoder()],
   ]);
 }
 
@@ -69,6 +80,9 @@ export function getEvtSwapDecoder(): FixedSizeDecoder<EvtSwap> {
     ['hasReferral', getBooleanDecoder()],
     ['params', getSwapParametersDecoder()],
     ['swapResult', getSwapResultDecoder()],
+    ['virtualBaseReserve', getU64Decoder()],
+    ['virtualQuoteReserve', getU64Decoder()],
+    ['remainingTokens', getU64Decoder()],
   ]);
 }
 

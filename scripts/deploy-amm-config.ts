@@ -17,7 +17,7 @@ async function main() {
   const { rpc, rpcSubscriptions, sendAndConfirmTransaction } = createSolanaClient({ urlOrMoniker: 'devnet' })
   const { value: ownerBalance } = await rpc.getBalance(owner.address).send()
 
-  const configKeyPair = await loadKeypairSignerFromFile('./keys/default_config_final')
+  const configKeyPair = await loadKeypairSignerFromFile('./keys/config_2025_10_13')
 
   console.log(`Account balance: ${ownerBalance}`)
   console.log(`Using config keypair: ${configKeyPair.address}`)

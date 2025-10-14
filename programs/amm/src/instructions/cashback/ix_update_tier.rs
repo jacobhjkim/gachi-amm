@@ -1,8 +1,8 @@
 use anchor_lang::prelude::*;
 
 use crate::{
-    assert_eq_admin, constants::seeds::CASHBACK_PREFIX, errors::AmmError, states::CashbackAccount,
-    events::EvtUpdateCashbackTier,
+    assert_eq_admin, constants::seeds::CASHBACK_PREFIX, errors::AmmError,
+    events::EvtUpdateCashbackTier, states::CashbackAccount,
 };
 
 #[event_cpi]
@@ -35,7 +35,7 @@ pub fn handle_update_cashback_tier(ctx: Context<UpdateCashbackTier>, new_tier: u
     let mut cashback_account = ctx.accounts.cashback_account.load_mut()?;
     let old_tier = cashback_account.current_tier;
     cashback_account.update_tier(new_tier)?;
-    
+
     emit_cpi!(EvtUpdateCashbackTier {
         owner: ctx.accounts.user.key(),
         old_tier,

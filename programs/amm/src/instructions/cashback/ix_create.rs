@@ -6,7 +6,9 @@ use anchor_spl::{
     },
 };
 
-use crate::{constants::seeds::CASHBACK_PREFIX, states::CashbackAccount, events::EvtCreateCashback};
+use crate::{
+    constants::seeds::CASHBACK_PREFIX, events::EvtCreateCashback, states::CashbackAccount,
+};
 
 #[event_cpi]
 #[derive(Accounts)]

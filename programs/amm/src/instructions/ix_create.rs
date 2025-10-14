@@ -241,6 +241,8 @@ pub fn handle_create_curve_spl_token(
         params.name,
         params.symbol,
         params.uri,
+        config.initial_virtual_quote_reserve,
+        config.initial_virtual_base_reserve,
     ));
     Ok(())
 }

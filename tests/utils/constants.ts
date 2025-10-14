@@ -27,7 +27,7 @@ export const DEFAULT_CONFIG_ARGS = {
   /* price configs */
   migrationBaseThreshold: 200_000_000_000_000n, // 20% of the supply
   migrationQuoteThreshold: 115_005_359_056n, // virtual quote reserves
-  initialVirtualQuoteReserve: 30_000_000_000n,
+  initialVirtualQuoteReserve: 30n * BigInt(LAMPORTS_PER_SOL),
   initialVirtualBaseReserve: 1_073_000_000_000_000n,
 }
 export const WSOL_MINT = address('So11111111111111111111111111111111111111112')

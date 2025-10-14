@@ -7,12 +7,12 @@ use anchor_spl::{
     },
 };
 
+use crate::events::EvtClaimCashback;
 use crate::{
     constants::{cashback::CASHBACK_CLAIM_COOLDOWN, seeds::CASHBACK_PREFIX},
     errors::AmmError,
     states::CashbackAccount,
 };
-use crate::events::EvtClaimCashback;
 
 #[event_cpi]
 #[derive(Accounts)]

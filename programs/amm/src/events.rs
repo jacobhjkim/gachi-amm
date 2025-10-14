@@ -40,6 +40,8 @@ pub struct EvtInitializeCurve {
     pub name: String,
     pub symbol: String,
     pub uri: String,
+    pub initial_virtual_quote_reserve: u64,
+    pub initial_virtual_base_reserve: u64,
 }
 
 #[event]
@@ -50,6 +52,9 @@ pub struct EvtSwap {
     pub has_referral: bool,
     pub params: SwapParameters,
     pub swap_result: SwapResult,
+    pub virtual_base_reserve: u64,
+    pub virtual_quote_reserve: u64,
+    pub remaining_tokens: u64,
 }
 
 #[event]

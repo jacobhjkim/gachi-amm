@@ -1,4 +1,5 @@
 use crate::constants::fee::FEE_DENOMINATOR;
+use crate::events::EvtInitializeCurve;
 use crate::safe_math::safe_mul_div_cast_u64;
 use crate::u128x128_math::Rounding;
 use crate::{
@@ -9,7 +10,6 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use crate::events::EvtInitializeCurve;
 
 /// Represents the result of checking graduation status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -331,6 +331,8 @@ impl BondingCurve {
         name: String,
         symbol: String,
         uri: String,
+        initial_virtual_quote_reserve: u64,
+        initial_virtual_base_reserve: u64,
     ) -> EvtInitializeCurve {
         EvtInitializeCurve {
             curve: curve_key.key(),
@@ -342,6 +344,8 @@ impl BondingCurve {
             name,
             symbol,
             uri,
+            initial_virtual_quote_reserve,
+            initial_virtual_base_reserve,
         }
     }
 }

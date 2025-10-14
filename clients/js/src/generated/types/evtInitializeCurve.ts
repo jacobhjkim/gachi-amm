@@ -16,6 +16,8 @@ import {
   getStructEncoder,
   getU32Decoder,
   getU32Encoder,
+  getU64Decoder,
+  getU64Encoder,
   getU8Decoder,
   getU8Encoder,
   getUtf8Decoder,
@@ -36,9 +38,23 @@ export type EvtInitializeCurve = {
   name: string;
   symbol: string;
   uri: string;
+  initialVirtualQuoteReserve: bigint;
+  initialVirtualBaseReserve: bigint;
 };
 
-export type EvtInitializeCurveArgs = EvtInitializeCurve;
+export type EvtInitializeCurveArgs = {
+  curve: Address;
+  config: Address;
+  creator: Address;
+  baseMint: Address;
+  quoteMint: Address;
+  curveType: number;
+  name: string;
+  symbol: string;
+  uri: string;
+  initialVirtualQuoteReserve: number | bigint;
+  initialVirtualBaseReserve: number | bigint;
+};
 
 export function getEvtInitializeCurveEncoder(): Encoder<EvtInitializeCurveArgs> {
   return getStructEncoder([
@@ -51,6 +67,8 @@ export function getEvtInitializeCurveEncoder(): Encoder<EvtInitializeCurveArgs> 
     ['name', addEncoderSizePrefix(getUtf8Encoder(), getU32Encoder())],
     ['symbol', addEncoderSizePrefix(getUtf8Encoder(), getU32Encoder())],
     ['uri', addEncoderSizePrefix(getUtf8Encoder(), getU32Encoder())],
+    ['initialVirtualQuoteReserve', getU64Encoder()],
+    ['initialVirtualBaseReserve', getU64Encoder()],
   ]);
 }
 
@@ -65,6 +83,8 @@ export function getEvtInitializeCurveDecoder(): Decoder<EvtInitializeCurve> {
     ['name', addDecoderSizePrefix(getUtf8Decoder(), getU32Decoder())],
     ['symbol', addDecoderSizePrefix(getUtf8Decoder(), getU32Decoder())],
     ['uri', addDecoderSizePrefix(getUtf8Decoder(), getU32Decoder())],
+    ['initialVirtualQuoteReserve', getU64Decoder()],
+    ['initialVirtualBaseReserve', getU64Decoder()],
   ]);
 }
 
