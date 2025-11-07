@@ -1,0 +1,30 @@
+{
+  "name": "eth-amm",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "bun test test-ts",
+    "test:watch": "bun test --watch test-ts",
+    "generate:types": "bun run script/generate-types.ts",
+    "build": "forge build && bun run generate:types",
+    "check-types": "tsc --noEmit",
+    "deploy:local": "./script/deploy-local.sh",
+    "initialize": "bun run script/initialize-contracts.ts",
+    "addresses": "bun script/load-addresses.ts",
+    "interact": "bun script/interact.ts",
+    "format": "biome format --write .",
+    "lint": "biome check --write .",
+    "lint:unsafe": "biome check --write --unsafe ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.3.4",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "viem": "^2.38.6"
+  }
+}
