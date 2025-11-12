@@ -220,7 +220,8 @@ describe('Trading', () => {
 			console.log(`  k after:  ${kAfter}`)
 			console.log(`  diff:     ${diffPercent / 100n}.${diffPercent % 100n}%`)
 
-			expect(diffPercent).toBeLessThan(100n) // Less than 1% difference
+			// With Math.mulDiv, we expect much better precision: < 0.01% (1 basis point)
+			expect(diffPercent).toBeLessThan(1n) // Less than 0.01% difference
 		})
 
 		test('respects slippage protection', async () => {
@@ -544,5 +545,127 @@ describe('Trading', () => {
 				}),
 			).rejects.toThrow()
 		})
+	})
+
+	describe('Precision Stress Test', () => {
+		test('k invariant holds after 500+ swaps', async () => {
+			console.log('\n🔬 Starting precision stress test...\n')
+
+			// Get initial state
+			const initialState = await client.readContract({
+				address: testCurveAddress,
+				abi: contracts.curve.abi,
+				functionName: 'state',
+			})
+
+			const initialK = initialState.virtualQuoteReserve * initialState.virtualBaseReserve
+			console.log(`Initial k: ${initialK}`)
+			console.log(
+				`Initial reserves: ${formatUnits(initialState.virtualQuoteReserve, 6)} USDC, ${formatUnits(initialState.virtualBaseReserve, 6)} tokens\n`,
+			)
+
+			// Approve tokens once for all sells (gas efficient - better than PERMIT2 for tests)
+			const maxUint256 = 2n ** 256n - 1n // Max uint256 value
+			const { request: approveTokenRequest } = await client.simulateContract({
+				account: accounts.alice,
+				address: testTokenAddress,
+				abi: contracts.token.abi,
+				functionName: 'approve',
+				args: [testCurveAddress, maxUint256], // Approve max amount
+			})
+			await walletClient.writeContract(approveTokenRequest)
+
+			// Perform 500 alternating buys and sells with small amounts
+			const numSwaps = 500
+			const swapAmount = BigInt(5 * 10 ** 6) // 5 USDC per buy
+
+			let maxKDrift = 0n
+			let minK = initialK
+			let maxK = initialK
+			let lastBuyAmountOut = 0n
+
+			for (let i = 0; i < numSwaps; i++) {
+				const isBuy = i % 2 === 0
+
+				if (isBuy) {
+					// Buy tokens with USDC
+					const { result, request } = await client.simulateContract({
+						account: accounts.alice,
+						address: testCurveAddress,
+						abi: contracts.curve.abi,
+						functionName: 'swap',
+						args: [accounts.alice.address, true, swapAmount, 0n],
+					})
+
+					lastBuyAmountOut = result
+					await walletClient.writeContract(request)
+				} else {
+					// Sell back the tokens we just bought (to reverse the trade and test both directions)
+					// Use 90% of what we bought to account for price impact
+					const sellAmount = (lastBuyAmountOut * 9n) / 10n
+
+					const { request } = await client.simulateContract({
+						account: accounts.alice,
+						address: testCurveAddress,
+						abi: contracts.curve.abi,
+						functionName: 'swap',
+						args: [accounts.alice.address, false, sellAmount, 0n],
+					})
+
+					await walletClient.writeContract(request)
+				}
+
+				// Check k every 100 swaps
+				if ((i + 1) % 100 === 0) {
+					const currentState = await client.readContract({
+						address: testCurveAddress,
+						abi: contracts.curve.abi,
+						functionName: 'state',
+					})
+
+					const currentK = currentState.virtualQuoteReserve * currentState.virtualBaseReserve
+					const kDiff = currentK > initialK ? currentK - initialK : initialK - currentK
+					const kDiffPercent = (kDiff * 10000n) / initialK
+
+					if (currentK < minK) minK = currentK
+					if (currentK > maxK) maxK = currentK
+					if (kDiff > maxKDrift) maxKDrift = kDiff
+
+					console.log(`After ${i + 1} swaps:`)
+					console.log(`  k: ${currentK}`)
+					console.log(`  drift: ${kDiffPercent / 100n}.${kDiffPercent % 100n}%`)
+					console.log(
+						`  reserves: ${formatUnits(currentState.virtualQuoteReserve, 6)} USDC, ${formatUnits(currentState.virtualBaseReserve, 6)} tokens`,
+					)
+				}
+			}
+
+			// Get final state
+			const finalState = await client.readContract({
+				address: testCurveAddress,
+				abi: contracts.curve.abi,
+				functionName: 'state',
+			})
+
+			const finalK = finalState.virtualQuoteReserve * finalState.virtualBaseReserve
+			const totalDrift = finalK > initialK ? finalK - initialK : initialK - finalK
+			const totalDriftPercent = (totalDrift * 10000n) / initialK
+
+			console.log(`\n📊 Final Results after ${numSwaps} swaps:`)
+			console.log(`  Initial k: ${initialK}`)
+			console.log(`  Final k:   ${finalK}`)
+			console.log(`  Min k:     ${minK}`)
+			console.log(`  Max k:     ${maxK}`)
+			console.log(`  Total drift: ${totalDriftPercent / 100n}.${totalDriftPercent % 100n}%`)
+			console.log(`  k increased: ${finalK >= initialK ? 'Yes (protocol favored)' : 'No (user favored)'}`)
+
+			// With proper rounding (Ceil), k should stay constant or increase
+			expect(finalK).toBeGreaterThanOrEqual(initialK)
+
+			// k drift should be minimal (< 0.1% even after 500 swaps)
+			expect(totalDriftPercent).toBeLessThan(10n) // Less than 0.1%
+
+			console.log('\n✅ Precision stress test passed!\n')
+		}, 120000) // 2 minute timeout for 500 swaps
 	})
 })

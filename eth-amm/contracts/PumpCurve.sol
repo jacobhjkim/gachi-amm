@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IPumpFactory} from "./interfaces/IPumpFactory.sol";
 import {IPumpCurve} from "./interfaces/IPumpCurve.sol";
 
@@ -119,8 +120,13 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
                     _getSwapAmountFromBaseToQuote(GRADUATION_THRESHOLD, newVirtualBase, cappedAmountOut);
 
                 // Recalculate fees on the capped input (add fees back to get total user pays)
-                uint256 cappedTotalAmountIn =
-                    (cappedActualAmountIn * MAX_BASIS_POINTS) / (MAX_BASIS_POINTS - feeConfig.feeBasisPoints);
+                // Round UP: user pays slightly more to ensure graduation threshold is reached (protocol favored)
+                uint256 cappedTotalAmountIn = Math.mulDiv(
+                    cappedActualAmountIn,
+                    MAX_BASIS_POINTS,
+                    MAX_BASIS_POINTS - feeConfig.feeBasisPoints,
+                    Math.Rounding.Ceil
+                );
                 fees = _calculateFees(cappedTotalAmountIn, feeConfig, l1, l2, l3);
 
                 // Update amounts to use capped values
@@ -230,14 +236,13 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
         pure
         returns (uint256 baseOut)
     {
-        // k = x * y (constant product)
-        uint256 k = virtualQuote * virtualBase;
-
         // New virtual quote after adding input
         uint256 newVirtualQuote = virtualQuote + amountIn;
 
-        // Calculate new virtual base maintaining k
-        uint256 newVirtualBase = k / newVirtualQuote;
+        // Calculate new virtual base maintaining k = virtualQuote * virtualBase
+        // Use mulDiv to prevent overflow in k calculation and preserve precision
+        // Round UP: makes newVirtualBase larger → user receives less tokens (protocol favored, k preserved)
+        uint256 newVirtualBase = Math.mulDiv(virtualQuote, virtualBase, newVirtualQuote, Math.Rounding.Ceil);
 
         // Output is the difference
         baseOut = virtualBase - newVirtualBase;
@@ -259,11 +264,10 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
         // New virtual base after adding input
         uint256 newVirtualBase = virtualBase + amountIn;
 
-        // k = x * y (constant product)
-        uint256 k = virtualQuote * virtualBase;
-
-        // Calculate new virtual quote maintaining k
-        uint256 newVirtualQuote = k / newVirtualBase;
+        // Calculate new virtual quote maintaining k = virtualQuote * virtualBase
+        // Use mulDiv to prevent overflow in k calculation and preserve precision
+        // Round UP: makes newVirtualQuote larger → user receives less tokens (protocol favored, k preserved)
+        uint256 newVirtualQuote = Math.mulDiv(virtualQuote, virtualBase, newVirtualBase, Math.Rounding.Ceil);
 
         // Output is the difference
         quoteOut = virtualQuote - newVirtualQuote;
@@ -287,28 +291,44 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
     ) internal view returns (FeeBreakdown memory fees) {
         bool hasReferral = l1 != address(0);
 
-        // Calculate individual fees from output amount
-        fees.l1ReferralFee = l1 != address(0) ? (amountOut * feeConfig.l1ReferralFeeBasisPoints) / MAX_BASIS_POINTS : 0;
-        fees.l2ReferralFee = l2 != address(0) ? (amountOut * feeConfig.l2ReferralFeeBasisPoints) / MAX_BASIS_POINTS : 0;
-        fees.l3ReferralFee = l3 != address(0) ? (amountOut * feeConfig.l3ReferralFeeBasisPoints) / MAX_BASIS_POINTS : 0;
-
-        // Get user's cashback tier and calculate cashback
-        uint8 userTier = IPumpFactory(factory).getCurrentTier(msg.sender);
-        IPumpFactory.Tier memory tier = IPumpFactory(factory).getTier(userTier);
-        fees.cashbackFee = (amountOut * tier.cashbackBasisPoints) / MAX_BASIS_POINTS;
-
-        // Creator fee
-        fees.creatorFee = (amountOut * feeConfig.creatorFeeBasisPoints) / MAX_BASIS_POINTS;
-
-        // Calculate total fee with referee discount if applicable
+        // Calculate total fee first with referee discount if applicable
+        // Round UP: user pays slightly more (protocol favored)
         uint256 effectiveFeeRate =
             hasReferral ? feeConfig.feeBasisPoints - feeConfig.refereeDiscountBasisPoints : feeConfig.feeBasisPoints;
 
-        fees.totalFee = (amountOut * effectiveFeeRate) / MAX_BASIS_POINTS;
+        fees.totalFee = Math.mulDiv(amountOut, effectiveFeeRate, MAX_BASIS_POINTS, Math.Rounding.Ceil);
+
+        // Calculate individual fee components
+        // Round DOWN: ensures sum of components won't exceed totalFee
+        fees.l1ReferralFee = l1 != address(0)
+            ? Math.mulDiv(amountOut, feeConfig.l1ReferralFeeBasisPoints, MAX_BASIS_POINTS, Math.Rounding.Floor)
+            : 0;
+        fees.l2ReferralFee = l2 != address(0)
+            ? Math.mulDiv(amountOut, feeConfig.l2ReferralFeeBasisPoints, MAX_BASIS_POINTS, Math.Rounding.Floor)
+            : 0;
+        fees.l3ReferralFee = l3 != address(0)
+            ? Math.mulDiv(amountOut, feeConfig.l3ReferralFeeBasisPoints, MAX_BASIS_POINTS, Math.Rounding.Floor)
+            : 0;
+
+        // Get user's cashback tier and calculate cashback
+        // Round DOWN: user receives slightly less cashback (protocol favored)
+        uint8 userTier = IPumpFactory(factory).getCurrentTier(msg.sender);
+        IPumpFactory.Tier memory tier = IPumpFactory(factory).getTier(userTier);
+        fees.cashbackFee = Math.mulDiv(amountOut, tier.cashbackBasisPoints, MAX_BASIS_POINTS, Math.Rounding.Floor);
+
+        // Creator fee
+        // Round DOWN: creator receives slightly less (protocol favored)
+        fees.creatorFee = Math.mulDiv(amountOut, feeConfig.creatorFeeBasisPoints, MAX_BASIS_POINTS, Math.Rounding.Floor);
 
         // Protocol fee is the remainder after all other fees
-        fees.protocolFee = fees.totalFee - fees.l1ReferralFee - fees.l2ReferralFee - fees.l3ReferralFee
-            - fees.creatorFee - fees.cashbackFee;
+        // This absorbs any rounding dust and ensures sum equals totalFee
+        uint256 sumOfComponentFees =
+            fees.l1ReferralFee + fees.l2ReferralFee + fees.l3ReferralFee + fees.creatorFee + fees.cashbackFee;
+
+        // Invariant: sum of components must not exceed total (should never fail with Floor rounding)
+        require(sumOfComponentFees <= fees.totalFee, "Fee invariant violated");
+
+        fees.protocolFee = fees.totalFee - sumOfComponentFees;
 
         return fees;
     }
