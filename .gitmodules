@@ -4,3 +4,6 @@
 [submodule "eth-amm/lib/forge-std"]
 	path = eth-amm/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
+[submodule "eth-amm/lib/solady"]
+	path = eth-amm/lib/solady
+	url = https://github.com/vectorized/solady
