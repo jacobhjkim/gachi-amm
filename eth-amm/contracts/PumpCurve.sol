@@ -63,9 +63,7 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
         _state = CurveState({
             virtualQuoteReserve: 4500 * 10 ** 6, // USDC has 6 decimals
             virtualBaseReserve: 1_073_000_000_000_000, // 1.073B tokens with 6 decimals
-            baseReserve: 793_100_000_000_000, // Base reserve allocated to sell with our curve
-            protocolFee: 0,
-            creatorFee: 0
+            baseReserve: 793_100_000_000_000 // Base reserve allocated to sell with our curve
         });
 
         emit CurveInitialized(_baseToken, _creator, _state.virtualQuoteReserve, _state.virtualBaseReserve);
@@ -84,14 +82,10 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
         require(amountIn > 0, "Amount in must be positive");
         require(recipient != address(0), "Invalid recipient");
 
-        // 2. Load state and config into memory (gas optimization)
+        // 2. Load state into memory (gas optimization)
         CurveState memory cache = _state;
-        IPumpFactory.FeeConfig memory feeConfig = IPumpFactory(factory).feeConfig();
 
-        // 3. Get referral chain from factory
-        (address l1, address l2, address l3) = IPumpFactory(factory).getReferralChain(msg.sender);
-
-        // 4. Calculate bonding curve output and fees
+        // 3. Calculate bonding curve output and fees
         uint256 newVirtualQuoteReserve;
         uint256 newVirtualBaseReserve;
         FeeBreakdown memory fees;
@@ -100,7 +94,17 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
         if (quoteToBase) {
             // Buying base tokens with quote tokens
             // Fees are deducted from INPUT quote before swap calculation
-            fees = _calculateFees(amountIn, feeConfig, l1, l2, l3);
+            // Get fees from factory (factory has all the logic)
+            (
+                fees.totalFee,
+                fees.protocolFee,
+                fees.creatorFee,
+                fees.cashbackFee,
+                fees.l1ReferralFee,
+                fees.l2ReferralFee,
+                fees.l3ReferralFee
+            ) = IPumpFactory(factory).calculateFees(msg.sender, amountIn);
+
             actualAmountIn = amountIn - fees.totalFee;
 
             // Calculate output using amount after fees
@@ -120,14 +124,27 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
                     _getSwapAmountFromBaseToQuote(GRADUATION_THRESHOLD, newVirtualBase, cappedAmountOut);
 
                 // Recalculate fees on the capped input (add fees back to get total user pays)
+                // Get fee config to calculate total amount needed
+                IPumpFactory.FeeConfig memory feeConfig = IPumpFactory(factory).feeConfig();
+                uint256 effectiveFeeRate = fees.l1ReferralFee > 0 || fees.l2ReferralFee > 0 || fees.l3ReferralFee > 0
+                    ? feeConfig.feeBasisPoints - feeConfig.refereeDiscountBasisPoints
+                    : feeConfig.feeBasisPoints;
+
                 // Round UP: user pays slightly more to ensure graduation threshold is reached (protocol favored)
                 uint256 cappedTotalAmountIn = Math.mulDiv(
-                    cappedActualAmountIn,
-                    MAX_BASIS_POINTS,
-                    MAX_BASIS_POINTS - feeConfig.feeBasisPoints,
-                    Math.Rounding.Ceil
+                    cappedActualAmountIn, MAX_BASIS_POINTS, MAX_BASIS_POINTS - effectiveFeeRate, Math.Rounding.Ceil
                 );
-                fees = _calculateFees(cappedTotalAmountIn, feeConfig, l1, l2, l3);
+
+                // Recalculate fees from factory
+                (
+                    fees.totalFee,
+                    fees.protocolFee,
+                    fees.creatorFee,
+                    fees.cashbackFee,
+                    fees.l1ReferralFee,
+                    fees.l2ReferralFee,
+                    fees.l3ReferralFee
+                ) = IPumpFactory(factory).calculateFees(msg.sender, cappedTotalAmountIn);
 
                 // Update amounts to use capped values
                 amountIn = cappedTotalAmountIn;
@@ -151,7 +168,17 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
             amountOut = _getSwapAmountFromBaseToQuote(cache.virtualQuoteReserve, cache.virtualBaseReserve, amountIn);
 
             // Fees are deducted from OUTPUT quote after swap calculation
-            fees = _calculateFees(amountOut, feeConfig, l1, l2, l3);
+            // Get fees from factory (factory has all the logic)
+            (
+                fees.totalFee,
+                fees.protocolFee,
+                fees.creatorFee,
+                fees.cashbackFee,
+                fees.l1ReferralFee,
+                fees.l2ReferralFee,
+                fees.l3ReferralFee
+            ) = IPumpFactory(factory).calculateFees(msg.sender, amountOut);
+
             amountOut -= fees.totalFee;
 
             // Update virtual reserves (use gross output for reserves)
@@ -174,12 +201,7 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
             _state.baseReserve = cache.baseReserve + amountIn;
         }
 
-        // Accumulate fees for protocol and creator (stored for withdrawal)
-        // Note: fees are always in quote tokens
-        _state.protocolFee = cache.protocolFee + fees.protocolFee;
-        _state.creatorFee = cache.creatorFee + fees.creatorFee;
-
-        // 7. Execute token transfers
+        // 6. Execute token transfers
         if (quoteToBase) {
             // Transfer quote tokens from user to curve
             IERC20(quoteToken).safeTransferFrom(msg.sender, address(this), amountIn);
@@ -192,17 +214,27 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
             IERC20(quoteToken).safeTransfer(recipient, amountOut);
         }
 
-        // 6. Add cashback and referral rewards
-        // Volume should always be tracked in quote tokens
-        uint256 quoteVolume = quoteToBase ? amountIn : (amountOut + fees.totalFee);
-        if (fees.cashbackFee > 0) {
-            IPumpFactory(factory).addCashback(msg.sender, quoteVolume, fees.totalFee);
-        }
-        if (fees.l1ReferralFee + fees.l2ReferralFee + fees.l3ReferralFee > 0) {
-            IPumpFactory(factory).addReferral(msg.sender, fees.totalFee);
+        // 7. Transfer all fees to factory for distribution
+        // Note: fees are always in quote tokens
+        if (fees.totalFee > 0) {
+            IERC20(quoteToken).safeTransfer(factory, fees.totalFee);
         }
 
-        // 7. Emit swap event
+        // 8. Track all fees in factory (single call for gas efficiency)
+        // Volume should always be tracked in quote tokens
+        uint256 quoteVolume = quoteToBase ? amountIn : (amountOut + fees.totalFee);
+        IPumpFactory(factory).addFees(
+            msg.sender,
+            quoteVolume,
+            fees.protocolFee,
+            fees.creatorFee,
+            fees.cashbackFee,
+            fees.l1ReferralFee,
+            fees.l2ReferralFee,
+            fees.l3ReferralFee
+        );
+
+        // 9. Emit swap event
         emit Swap(
             msg.sender,
             recipient,
@@ -221,6 +253,20 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
         );
 
         return amountOut;
+    }
+
+    /// @notice Calculate swap output without executing the trade (view function for testing)
+    /// @param amountIn Amount of input tokens
+    /// @param quoteToBase Direction: true for buy (quote -> base), false for sell (base -> quote)
+    /// @return amountOut Amount of output tokens (before fees)
+    function calculateSwapOutput(uint256 amountIn, bool quoteToBase) external view returns (uint256 amountOut) {
+        if (quoteToBase) {
+            // Buying: quote -> base
+            return _getSwapAmountFromQuoteToBase(_state.virtualQuoteReserve, _state.virtualBaseReserve, amountIn);
+        } else {
+            // Selling: base -> quote
+            return _getSwapAmountFromBaseToQuote(_state.virtualQuoteReserve, _state.virtualBaseReserve, amountIn);
+        }
     }
 
     // ============ Internal Functions ============
@@ -273,63 +319,5 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
         quoteOut = virtualQuote - newVirtualQuote;
 
         return quoteOut;
-    }
-
-    /// @notice Calculate fee breakdown following Solana logic
-    /// @param amountOut The output amount before fees
-    /// @param feeConfig The fee configuration from factory
-    /// @param l1 L1 referrer address
-    /// @param l2 L2 referrer address
-    /// @param l3 L3 referrer address
-    /// @return fees The calculated fee breakdown
-    function _calculateFees(
-        uint256 amountOut,
-        IPumpFactory.FeeConfig memory feeConfig,
-        address l1,
-        address l2,
-        address l3
-    ) internal view returns (FeeBreakdown memory fees) {
-        bool hasReferral = l1 != address(0);
-
-        // Calculate total fee first with referee discount if applicable
-        // Round UP: user pays slightly more (protocol favored)
-        uint256 effectiveFeeRate =
-            hasReferral ? feeConfig.feeBasisPoints - feeConfig.refereeDiscountBasisPoints : feeConfig.feeBasisPoints;
-
-        fees.totalFee = Math.mulDiv(amountOut, effectiveFeeRate, MAX_BASIS_POINTS, Math.Rounding.Ceil);
-
-        // Calculate individual fee components
-        // Round DOWN: ensures sum of components won't exceed totalFee
-        fees.l1ReferralFee = l1 != address(0)
-            ? Math.mulDiv(amountOut, feeConfig.l1ReferralFeeBasisPoints, MAX_BASIS_POINTS, Math.Rounding.Floor)
-            : 0;
-        fees.l2ReferralFee = l2 != address(0)
-            ? Math.mulDiv(amountOut, feeConfig.l2ReferralFeeBasisPoints, MAX_BASIS_POINTS, Math.Rounding.Floor)
-            : 0;
-        fees.l3ReferralFee = l3 != address(0)
-            ? Math.mulDiv(amountOut, feeConfig.l3ReferralFeeBasisPoints, MAX_BASIS_POINTS, Math.Rounding.Floor)
-            : 0;
-
-        // Get user's cashback tier and calculate cashback
-        // Round DOWN: user receives slightly less cashback (protocol favored)
-        uint8 userTier = IPumpFactory(factory).getCurrentTier(msg.sender);
-        IPumpFactory.Tier memory tier = IPumpFactory(factory).getTier(userTier);
-        fees.cashbackFee = Math.mulDiv(amountOut, tier.cashbackBasisPoints, MAX_BASIS_POINTS, Math.Rounding.Floor);
-
-        // Creator fee
-        // Round DOWN: creator receives slightly less (protocol favored)
-        fees.creatorFee = Math.mulDiv(amountOut, feeConfig.creatorFeeBasisPoints, MAX_BASIS_POINTS, Math.Rounding.Floor);
-
-        // Protocol fee is the remainder after all other fees
-        // This absorbs any rounding dust and ensures sum equals totalFee
-        uint256 sumOfComponentFees =
-            fees.l1ReferralFee + fees.l2ReferralFee + fees.l3ReferralFee + fees.creatorFee + fees.cashbackFee;
-
-        // Invariant: sum of components must not exceed total (should never fail with Floor rounding)
-        require(sumOfComponentFees <= fees.totalFee, "Fee invariant violated");
-
-        fees.protocolFee = fees.totalFee - sumOfComponentFees;
-
-        return fees;
     }
 }

@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {EfficientHashLib} from "solady/utils/EfficientHashLib.sol";
 
 contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
@@ -36,6 +37,14 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
 
     /// @notice Tier configurations (7 tiers: Wood to Champion)
     Tier[] private tiers;
+
+    // ============ Fee Storage ============
+
+    /// @notice Accumulated protocol fees (in quote tokens)
+    uint256 public accumulatedProtocolFees;
+
+    /// @notice Accumulated creator fees per curve (curve address => creator fees)
+    mapping(address => uint256) public accumulatedCreatorFees;
 
     constructor(address _quoteToken) Ownable(msg.sender) {
         require(_quoteToken != address(0), "Invalid quote token");
@@ -280,37 +289,144 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
         return (cashbackAmount, referralAmount);
     }
 
+    /// @inheritdoc IPumpFactory
+    function claimProtocolFee() external onlyOwner nonReentrant returns (uint256 amount) {
+        amount = accumulatedProtocolFees;
+
+        if (amount == 0) revert NothingToClaim();
+
+        accumulatedProtocolFees = 0;
+
+        require(IERC20(quoteToken).transfer(msg.sender, amount), "USDC transfer failed");
+
+        emit ProtocolFeeClaimed(msg.sender, amount);
+        return amount;
+    }
+
+    /// @inheritdoc IPumpFactory
+    function claimCreatorFee(address curve) external nonReentrant returns (uint256 amount) {
+        // Verify the curve exists and caller is the creator
+        address baseToken = PumpCurve(curve).baseToken();
+        require(getCurve[baseToken] == curve, "Invalid curve");
+        require(PumpCurve(curve).creator() == msg.sender, "Not the creator");
+
+        amount = accumulatedCreatorFees[curve];
+
+        if (amount == 0) revert NothingToClaim();
+
+        accumulatedCreatorFees[curve] = 0;
+
+        require(IERC20(quoteToken).transfer(msg.sender, amount), "USDC transfer failed");
+
+        emit CreatorFeeClaimed(msg.sender, curve, amount);
+        return amount;
+    }
+
     // ============ Cashback Curve Functions ============
 
     /// @inheritdoc IPumpFactory
-    function addCashback(address user, uint256 volume, uint256 totalFeeAmount) external nonReentrant {
+    function calculateFees(address user, uint256 tradeAmount)
+        external
+        view
+        override
+        returns (
+            uint256 totalFee,
+            uint256 protocolFee,
+            uint256 creatorFee,
+            uint256 cashbackFee,
+            uint256 l1ReferralFee,
+            uint256 l2ReferralFee,
+            uint256 l3ReferralFee
+        )
+    {
+        // Get referral chain to determine if user has referrals (affects total fee via discount)
+        (address l1, address l2, address l3) = this.getReferralChain(user);
+        bool hasReferral = l1 != address(0);
+
+        // Calculate total fee first with referee discount if applicable
+        // Round UP: user pays slightly more (protocol favored)
+        uint256 effectiveFeeRate =
+            hasReferral ? _feeConfig.feeBasisPoints - _feeConfig.refereeDiscountBasisPoints : _feeConfig.feeBasisPoints;
+
+        totalFee = Math.mulDiv(tradeAmount, effectiveFeeRate, MAX_BASIS_POINTS, Math.Rounding.Ceil);
+
+        // Calculate individual fee components as percentages of totalFee
+        // Round DOWN: ensures sum of components won't exceed totalFee
+        l1ReferralFee = l1 != address(0)
+            ? Math.mulDiv(totalFee, _feeConfig.l1ReferralFeeBasisPoints, _feeConfig.feeBasisPoints, Math.Rounding.Floor)
+            : 0;
+        l2ReferralFee = l2 != address(0)
+            ? Math.mulDiv(totalFee, _feeConfig.l2ReferralFeeBasisPoints, _feeConfig.feeBasisPoints, Math.Rounding.Floor)
+            : 0;
+        l3ReferralFee = l3 != address(0)
+            ? Math.mulDiv(totalFee, _feeConfig.l3ReferralFeeBasisPoints, _feeConfig.feeBasisPoints, Math.Rounding.Floor)
+            : 0;
+
+        // Get user's cashback tier and calculate cashback as percentage of totalFee
+        // Round DOWN: user receives slightly less cashback (protocol favored)
+        uint8 userTier = _calculateTier(accounts[user].totalVolume);
+        cashbackFee =
+            Math.mulDiv(totalFee, tiers[userTier].cashbackBasisPoints, _feeConfig.feeBasisPoints, Math.Rounding.Floor);
+
+        // Creator fee as percentage of totalFee
+        // Round DOWN: creator receives slightly less (protocol favored)
+        creatorFee =
+            Math.mulDiv(totalFee, _feeConfig.creatorFeeBasisPoints, _feeConfig.feeBasisPoints, Math.Rounding.Floor);
+
+        // Protocol fee is the remainder after all other fees
+        // This absorbs any rounding dust and ensures sum equals totalFee
+        uint256 sumOfComponentFees = l1ReferralFee + l2ReferralFee + l3ReferralFee + creatorFee + cashbackFee;
+
+        // Invariant: sum of components must not exceed total (should never fail with Floor rounding)
+        require(sumOfComponentFees <= totalFee, "Fee invariant violated");
+
+        protocolFee = totalFee - sumOfComponentFees;
+
+        return (totalFee, protocolFee, creatorFee, cashbackFee, l1ReferralFee, l2ReferralFee, l3ReferralFee);
+    }
+
+    /// @inheritdoc IPumpFactory
+    function addFees(
+        address user,
+        uint256 volume,
+        uint256 protocolFee,
+        uint256 creatorFee,
+        uint256 cashbackFee,
+        uint256 l1ReferralFee,
+        uint256 l2ReferralFee,
+        uint256 l3ReferralFee
+    ) external nonReentrant {
         // Verify caller is a legitimate curve deployed by this factory
         address baseToken = PumpCurve(msg.sender).baseToken();
         require(getCurve[baseToken] == msg.sender, "Unauthorized: not a factory curve");
 
         CashbackAccount storage account = accounts[user];
 
-        // Update user's total volume
+        // Calculate total fee amount for cashback/referral calculations
+        uint256 totalFeeAmount = protocolFee + creatorFee + cashbackFee + l1ReferralFee + l2ReferralFee + l3ReferralFee;
+
+        // 1. Update user's total volume
         account.totalVolume += volume;
 
-        // Calculate user's current tier (not stored, derived on-the-fly)
+        // 2. Calculate and add user's cashback based on their current tier
+        // Cashback is calculated as a percentage of the TOTAL FEE (not the trade amount)
         uint8 currentTier = _calculateTier(account.totalVolume);
-
-        // Calculate user's cashback based on their current tier
         uint256 userCashback = (totalFeeAmount * tiers[currentTier].cashbackBasisPoints) / MAX_BASIS_POINTS;
         if (userCashback > 0) {
             account.accumulatedCashback += userCashback;
             emit CashbackAdded(user, volume, userCashback, currentTier);
         }
-    }
 
-    /// @inheritdoc IPumpFactory
-    function addReferral(address user, uint256 totalFeeAmount) external nonReentrant {
-        // Verify caller is a legitimate curve deployed by this factory
-        address baseToken = PumpCurve(msg.sender).baseToken();
-        require(getCurve[baseToken] == msg.sender, "Unauthorized: not a factory curve");
+        // 3. Track protocol and creator fees
+        if (protocolFee > 0) {
+            accumulatedProtocolFees += protocolFee;
+        }
+        if (creatorFee > 0) {
+            accumulatedCreatorFees[msg.sender] += creatorFee;
+        }
 
-        // Distribute referral rewards (L1, L2, L3)
+        // 4. Distribute referral rewards (L1, L2, L3)
+        // Referrals are calculated as a percentage of the TOTAL FEE (not the trade amount)
         (address l1, address l2, address l3) = this.getReferralChain(user);
 
         if (l1 != address(0)) {

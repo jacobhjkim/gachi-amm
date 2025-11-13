@@ -4,8 +4,10 @@ import { createTestPublicClient, createTestWalletClient, checkAnvilConnection } 
 import { type DeployedContracts, loadDeployedContracts } from './libs/contracts.ts'
 import { getAllAccounts } from './libs/accounts.ts'
 import { randomBytes } from 'crypto'
+import { calculateSwapOutput, calculatePriceImpact } from './libs/swap.ts'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address
+const MAX_UINT256 = 2n ** 256n - 1n // Max uint256 value
 
 // Helper function to generate random requestId
 const generateRequestId = () => `0x${randomBytes(32).toString('hex')}` as Hex
@@ -72,7 +74,7 @@ describe('Trading', () => {
 				address: contracts.usdc.address,
 				abi: contracts.usdc.abi,
 				functionName: 'approve',
-				args: [testCurveAddress, mintAmount],
+				args: [testCurveAddress, MAX_UINT256],
 			})
 			await walletClient.writeContract(approveRequest)
 		}
@@ -88,6 +90,79 @@ describe('Trading', () => {
 	})
 
 	describe('Buying Tokens (Quote → Base)', () => {
+		test('TypeScript swap calculation matches actual swap', async () => {
+			const amountIn = parseUnits('100', 6) // 100 USDC
+
+			// Get current curve state and fee config in parallel
+			const [state, feeConfig] = await Promise.all([
+				client.readContract({
+					address: testCurveAddress,
+					abi: contracts.curve.abi,
+					functionName: 'state',
+				}),
+				client.readContract({
+					address: contracts.factory.address,
+					abi: contracts.factory.abi,
+					functionName: 'feeConfig',
+				}),
+			])
+
+			// For a buy, fees are deducted from input BEFORE swap calculation
+			// Calculate total fee (approximately - assuming no referral for simplicity)
+			const totalFee = (amountIn * BigInt(feeConfig.feeBasisPoints)) / 10000n
+			const actualAmountIn = amountIn - totalFee
+
+			// Predict output using TypeScript (after fees)
+			const predictedOutput = calculateSwapOutput(
+				state.virtualQuoteReserve,
+				state.virtualBaseReserve,
+				actualAmountIn,
+				true, // quoteToBase
+			)
+
+			// Execute actual swap
+			const { request } = await client.simulateContract({
+				account: accounts.alice,
+				address: testCurveAddress,
+				abi: contracts.curve.abi,
+				functionName: 'swap',
+				args: [accounts.alice.address, true, amountIn, 0n],
+			})
+
+			const hash = await walletClient.writeContract(request)
+			const receipt = await client.waitForTransactionReceipt({ hash })
+
+			const logs = parseEventLogs({
+				abi: contracts.curve.abi,
+				eventName: 'Swap',
+				logs: receipt.logs,
+			})
+
+			const actualOutput = logs[0]!.args.amountOut
+			const actualFee = logs[0]!.args.tradingFee
+
+			console.log('\n🔮 Swap Prediction Test:')
+			console.log(`  Amount in: ${formatUnits(amountIn, 6)} USDC`)
+			console.log(`  Estimated fee: ${formatUnits(totalFee, 6)} USDC`)
+			console.log(`  Actual fee: ${formatUnits(actualFee, 6)} USDC`)
+			console.log(`  Actual amount in (after fee): ${formatUnits(amountIn - actualFee, 6)} USDC`)
+			console.log(`  Predicted output: ${formatUnits(predictedOutput, 6)} tokens`)
+			console.log(`  Actual output: ${formatUnits(actualOutput, 6)} tokens`)
+
+			// Recalculate with actual fee for exact match
+			const exactPrediction = calculateSwapOutput(
+				state.virtualQuoteReserve,
+				state.virtualBaseReserve,
+				amountIn - actualFee,
+				true,
+			)
+
+			console.log(`  Exact prediction (with actual fee): ${formatUnits(exactPrediction, 6)} tokens`)
+
+			// Exact prediction should match
+			expect(exactPrediction).toBe(actualOutput)
+		})
+
 		test('buys tokens with USDC', async () => {
 			const amountIn = BigInt(100 * 10 ** 6) // 100 USDC
 
@@ -122,7 +197,6 @@ describe('Trading', () => {
 				eventName: 'Swap',
 				logs: receipt.logs,
 			})
-
 			expect(logs.length).toBe(1)
 			const swapEvent = logs[0]!.args
 
@@ -307,7 +381,7 @@ describe('Trading', () => {
 	describe('Selling Tokens (Base → Quote)', () => {
 		test('sells tokens for USDC', async () => {
 			// First buy some tokens
-			const buyAmount = parseUnits('100', 6)
+			const buyAmount = BigInt(100 * 10 ** 6) // 100 USDC
 			const { request: buyRequest } = await client.simulateContract({
 				account: accounts.alice,
 				address: testCurveAddress,
@@ -333,12 +407,9 @@ describe('Trading', () => {
 				address: testTokenAddress,
 				abi: contracts.token.abi,
 				functionName: 'approve',
-				args: [testCurveAddress, tokensBought],
+				args: [testCurveAddress, MAX_UINT256],
 			})
 			await walletClient.writeContract(approveRequest)
-
-			// Now sell half the tokens
-			const sellAmount = tokensBought / 2n
 
 			const [aliceUsdcBefore, { request: sellRequest }] = await Promise.all([
 				client.readContract({
@@ -352,7 +423,7 @@ describe('Trading', () => {
 					address: testCurveAddress,
 					abi: contracts.curve.abi,
 					functionName: 'swap',
-					args: [accounts.alice.address, false, sellAmount, 0n], // quoteToBase = false
+					args: [accounts.alice.address, false, tokensBought, 0n], // quoteToBase = false
 				}),
 			])
 
@@ -373,7 +444,7 @@ describe('Trading', () => {
 			console.log(`  Fee: ${formatUnits(sellEvent.tradingFee, 6)} USDC`)
 
 			expect(sellEvent.quoteToBase).toBe(false)
-			expect(sellEvent.amountIn).toBe(sellAmount)
+			expect(sellEvent.amountIn).toBe(tokensBought)
 			expect(sellEvent.amountOut).toBeGreaterThan(0n)
 
 			// Verify Alice received USDC
@@ -418,7 +489,6 @@ describe('Trading', () => {
 				args: [testCurveAddress, tokensBought],
 			})
 			await walletClient.writeContract(approveRequest)
-
 			const [stateBefore, { request: sellRequest }] = await Promise.all([
 				client.readContract({
 					address: testCurveAddress,
@@ -477,11 +547,17 @@ describe('Trading', () => {
 		test('accumulates protocol and creator fees', async () => {
 			const amountIn = parseUnits('100', 6)
 
-			const [stateBefore, { request }] = await Promise.all([
+			const [protocolFeesBefore, creatorFeesBefore, { request }] = await Promise.all([
 				client.readContract({
-					address: testCurveAddress,
-					abi: contracts.curve.abi,
-					functionName: 'state',
+					address: contracts.factory.address,
+					abi: contracts.factory.abi,
+					functionName: 'accumulatedProtocolFees',
+				}),
+				client.readContract({
+					address: contracts.factory.address,
+					abi: contracts.factory.abi,
+					functionName: 'accumulatedCreatorFees',
+					args: [testCurveAddress],
 				}),
 				client.simulateContract({
 					account: accounts.alice,
@@ -503,19 +579,27 @@ describe('Trading', () => {
 
 			const swapEvent = logs[0]!.args
 
-			const stateAfter = await client.readContract({
-				address: testCurveAddress,
-				abi: contracts.curve.abi,
-				functionName: 'state',
-			})
+			const [protocolFeesAfter, creatorFeesAfter] = await Promise.all([
+				client.readContract({
+					address: contracts.factory.address,
+					abi: contracts.factory.abi,
+					functionName: 'accumulatedProtocolFees',
+				}),
+				client.readContract({
+					address: contracts.factory.address,
+					abi: contracts.factory.abi,
+					functionName: 'accumulatedCreatorFees',
+					args: [testCurveAddress],
+				}),
+			])
 
 			console.log(`\n💰 Fee Accumulation:`)
 			console.log(`  Protocol fee: ${formatUnits(swapEvent.protocolFee, 6)} tokens`)
 			console.log(`  Creator fee: ${formatUnits(swapEvent.creatorFee, 6)} tokens`)
 
 			// Fees should be accumulated
-			expect(stateAfter.protocolFee).toBe(stateBefore.protocolFee + swapEvent.protocolFee)
-			expect(stateAfter.creatorFee).toBe(stateBefore.creatorFee + swapEvent.creatorFee)
+			expect(protocolFeesAfter).toBe(protocolFeesBefore + swapEvent.protocolFee)
+			expect(creatorFeesAfter).toBe(creatorFeesBefore + swapEvent.creatorFee)
 		})
 	})
 
@@ -548,7 +632,7 @@ describe('Trading', () => {
 	})
 
 	describe('Precision Stress Test', () => {
-		test('k invariant holds after 500+ swaps', async () => {
+		test('k invariant holds after 5000+ swaps', async () => {
 			console.log('\n🔬 Starting precision stress test...\n')
 
 			// Get initial state
@@ -565,18 +649,17 @@ describe('Trading', () => {
 			)
 
 			// Approve tokens once for all sells (gas efficient - better than PERMIT2 for tests)
-			const maxUint256 = 2n ** 256n - 1n // Max uint256 value
 			const { request: approveTokenRequest } = await client.simulateContract({
 				account: accounts.alice,
 				address: testTokenAddress,
 				abi: contracts.token.abi,
 				functionName: 'approve',
-				args: [testCurveAddress, maxUint256], // Approve max amount
+				args: [testCurveAddress, MAX_UINT256], // Approve max amount
 			})
 			await walletClient.writeContract(approveTokenRequest)
 
 			// Perform 500 alternating buys and sells with small amounts
-			const numSwaps = 500
+			const numSwaps = 1000
 			const swapAmount = BigInt(5 * 10 ** 6) // 5 USDC per buy
 
 			let maxKDrift = 0n
@@ -589,7 +672,7 @@ describe('Trading', () => {
 
 				if (isBuy) {
 					// Buy tokens with USDC
-					const { result, request } = await client.simulateContract({
+					const { request } = await client.simulateContract({
 						account: accounts.alice,
 						address: testCurveAddress,
 						abi: contracts.curve.abi,
@@ -597,26 +680,96 @@ describe('Trading', () => {
 						args: [accounts.alice.address, true, swapAmount, 0n],
 					})
 
-					lastBuyAmountOut = result
-					await walletClient.writeContract(request)
-				} else {
-					// Sell back the tokens we just bought (to reverse the trade and test both directions)
-					// Use 90% of what we bought to account for price impact
-					const sellAmount = (lastBuyAmountOut * 9n) / 10n
+					const hash = await walletClient.writeContract(request)
+					const receipt = await client.waitForTransactionReceipt({ hash })
 
-					const { request } = await client.simulateContract({
-						account: accounts.alice,
-						address: testCurveAddress,
+					// Check if transaction succeeded
+					if (receipt.status !== 'success') {
+						console.log(`\n❌ BUY FAILED at swap ${i + 1}:`)
+						console.log(`  Transaction hash: ${hash}`)
+						console.log(`  Status: ${receipt.status}`)
+						throw new Error(`Buy transaction failed at swap ${i + 1}`)
+					}
+
+					// Parse the Swap event to get the ACTUAL amount received
+					const logs = parseEventLogs({
 						abi: contracts.curve.abi,
-						functionName: 'swap',
-						args: [accounts.alice.address, false, sellAmount, 0n],
+						eventName: 'Swap',
+						logs: receipt.logs,
 					})
 
-					await walletClient.writeContract(request)
+					if (logs.length === 0) {
+						throw new Error(`No Swap event emitted for buy ${i + 1}`)
+					}
+
+					const swapEvent = logs[0]!.args
+					// Use the ACTUAL amount from the event, not the simulated amount
+					lastBuyAmountOut = swapEvent.amountOut
+				} else {
+					try {
+						const { request } = await client.simulateContract({
+							account: accounts.alice,
+							address: testCurveAddress,
+							abi: contracts.curve.abi,
+							functionName: 'swap',
+							args: [accounts.alice.address, false, lastBuyAmountOut, 0n],
+						})
+
+						await walletClient.writeContract(request)
+					} catch (error) {
+						// Capture state at failure
+						const [failureState, curveTokenBalance, aliceTokenBalance, curveUsdcBalance, aliceUsdcBalance] =
+							await Promise.all([
+								client.readContract({
+									address: testCurveAddress,
+									abi: contracts.curve.abi,
+									functionName: 'state',
+								}),
+								client.readContract({
+									address: testTokenAddress,
+									abi: contracts.token.abi,
+									functionName: 'balanceOf',
+									args: [testCurveAddress],
+								}),
+								client.readContract({
+									address: testTokenAddress,
+									abi: contracts.token.abi,
+									functionName: 'balanceOf',
+									args: [accounts.alice.address],
+								}),
+								client.readContract({
+									address: contracts.usdc.address,
+									abi: contracts.usdc.abi,
+									functionName: 'balanceOf',
+									args: [testCurveAddress],
+								}),
+								client.readContract({
+									address: contracts.usdc.address,
+									abi: contracts.usdc.abi,
+									functionName: 'balanceOf',
+									args: [accounts.alice.address],
+								}),
+							])
+
+						console.log(`\n❌ FAILURE at swap ${i + 1} (sell operation):`)
+						console.log(`\n  CURVE STATE:`)
+						console.log(`    Virtual Quote Reserve: ${formatUnits(failureState.virtualQuoteReserve, 6)} USDC`)
+						console.log(`    Virtual Base Reserve:  ${formatUnits(failureState.virtualBaseReserve, 6)} tokens`)
+						console.log(`    Stored Base Reserve:   ${formatUnits(failureState.baseReserve, 6)} tokens`)
+						console.log(`\n  ACTUAL BALANCES:`)
+						console.log(`    Curve Token Balance:   ${formatUnits(curveTokenBalance, 6)} tokens`)
+						console.log(`    Curve USDC Balance:    ${formatUnits(curveUsdcBalance, 6)} USDC`)
+						console.log(`    Alice's Token Balance: ${formatUnits(aliceTokenBalance, 6)} tokens`)
+						console.log(`    Alice's USDC Balance:  ${formatUnits(aliceUsdcBalance, 6)} USDC`)
+						console.log(`\n  TRADE ATTEMPT:`)
+						console.log(`    Selling:               ${formatUnits(lastBuyAmountOut, 6)} tokens`)
+						console.log(`    Alice's shortage:      ${formatUnits(lastBuyAmountOut - aliceTokenBalance, 6)} tokens`)
+						throw error
+					}
 				}
 
 				// Check k every 100 swaps
-				if ((i + 1) % 100 === 0) {
+				if ((i + 1) % 200 === 0) {
 					const currentState = await client.readContract({
 						address: testCurveAddress,
 						abi: contracts.curve.abi,

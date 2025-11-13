@@ -10,14 +10,10 @@ interface IPumpCurve {
     /// @param virtualQuoteReserve Virtual quote token reserves for bonding curve calculations
     /// @param virtualBaseReserve Virtual base token reserves for bonding curve calculations
     /// @param baseReserve Actual base token reserves held by the curve
-    /// @param protocolFee Accumulated protocol fees
-    /// @param creatorFee Accumulated creator fees
     struct CurveState {
         uint256 virtualQuoteReserve;
         uint256 virtualBaseReserve;
         uint256 baseReserve;
-        uint256 protocolFee;
-        uint256 creatorFee;
     }
 
     /// @notice Fee breakdown for swap calculations
@@ -105,6 +101,12 @@ interface IPumpCurve {
     /// @notice Returns whether the curve has graduated to DEX
     /// @return True if graduated, false otherwise
     function graduated() external view returns (bool);
+
+    /// @notice Calculate swap output without executing the trade (view function for testing)
+    /// @param amountIn Amount of input tokens
+    /// @param quoteToBase Direction: true for buy (quote -> base), false for sell (base -> quote)
+    /// @return amountOut Amount of output tokens (before fees)
+    function calculateSwapOutput(uint256 amountIn, bool quoteToBase) external view returns (uint256 amountOut);
 
     // ============ Trading Functions ============
 

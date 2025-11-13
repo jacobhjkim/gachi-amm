@@ -103,6 +103,17 @@ interface IPumpFactory {
     /// @param amount The USDC amount claimed
     event ReferralClaimed(address indexed user, uint256 amount);
 
+    /// @notice Emitted when protocol fees are claimed
+    /// @param owner The protocol owner claiming fees
+    /// @param amount The USDC amount claimed
+    event ProtocolFeeClaimed(address indexed owner, uint256 amount);
+
+    /// @notice Emitted when creator fees are claimed
+    /// @param creator The creator claiming fees
+    /// @param curve The curve address from which fees are claimed
+    /// @param amount The USDC amount claimed
+    event CreatorFeeClaimed(address indexed creator, address indexed curve, uint256 amount);
+
     // ============ Errors ============
 
     error ReferrerAlreadySet();
@@ -191,20 +202,61 @@ interface IPumpFactory {
     /// @return referralAmount The referral USDC amount claimed
     function claimAll() external returns (uint256 cashbackAmount, uint256 referralAmount);
 
+    /// @notice Claim accumulated protocol fees (owner only)
+    /// @return amount The USDC amount claimed
+    function claimProtocolFee() external returns (uint256 amount);
+
+    /// @notice Claim accumulated creator fees from a specific curve
+    /// @param curve The curve address to claim fees from
+    /// @return amount The USDC amount claimed
+    function claimCreatorFee(address curve) external returns (uint256 amount);
+
     // ============ Cashback Curve Functions ============
 
-    /// @notice Add cashback rewards for a user's own trade
-    /// @dev Callable by authorized curves only. Updates user's volume and adds cashback to their account.
+    /// @notice Calculate all fees for a trade
+    /// @dev View function that calculates fee breakdown based on user's tier and referral status
+    /// @param user The trader address
+    /// @param tradeAmount The trade amount to calculate fees from (in quote tokens, USDC 6 decimals)
+    /// @return totalFee The total fee to charge (with referee discount if applicable)
+    /// @return protocolFee The protocol fee portion
+    /// @return creatorFee The creator fee portion
+    /// @return cashbackFee The cashback fee portion (based on user's tier)
+    /// @return l1ReferralFee The L1 referral fee portion
+    /// @return l2ReferralFee The L2 referral fee portion
+    /// @return l3ReferralFee The L3 referral fee portion
+    function calculateFees(address user, uint256 tradeAmount)
+        external
+        view
+        returns (
+            uint256 totalFee,
+            uint256 protocolFee,
+            uint256 creatorFee,
+            uint256 cashbackFee,
+            uint256 l1ReferralFee,
+            uint256 l2ReferralFee,
+            uint256 l3ReferralFee
+        );
+
+    /// @notice Record fees from a trade and distribute to appropriate parties
+    /// @dev Callable by authorized curves only. Handles volume tracking, cashback, protocol/creator fees, and referrals.
     /// @param user The trader address
     /// @param volume The trade volume in quote token (USDC, 6 decimals)
-    /// @param totalFeeAmount The total fee amount collected from the trade (USDC, 6 decimals)
-    function addCashback(address user, uint256 volume, uint256 totalFeeAmount) external;
-
-    /// @notice Distribute referral rewards to the user's referral chain
-    /// @dev Callable by authorized curves only. Distributes rewards to L1, L2, L3 referrers.
-    /// @param user The trader address whose referrers will receive rewards
-    /// @param totalFeeAmount The total fee amount to calculate referral rewards from (USDC, 6 decimals)
-    function addReferral(address user, uint256 totalFeeAmount) external;
+    /// @param protocolFee The protocol fee amount from this trade (USDC, 6 decimals)
+    /// @param creatorFee The creator fee amount from this trade (USDC, 6 decimals)
+    /// @param cashbackFee The cashback fee amount from this trade (USDC, 6 decimals)
+    /// @param l1ReferralFee The L1 referral fee amount (USDC, 6 decimals)
+    /// @param l2ReferralFee The L2 referral fee amount (USDC, 6 decimals)
+    /// @param l3ReferralFee The L3 referral fee amount (USDC, 6 decimals)
+    function addFees(
+        address user,
+        uint256 volume,
+        uint256 protocolFee,
+        uint256 creatorFee,
+        uint256 cashbackFee,
+        uint256 l1ReferralFee,
+        uint256 l2ReferralFee,
+        uint256 l3ReferralFee
+    ) external;
 
     // ============ Cashback Admin Functions ============
 
