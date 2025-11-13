@@ -7,3 +7,6 @@
 [submodule "eth-amm/lib/solady"]
 	path = eth-amm/lib/solady
 	url = https://github.com/vectorized/solady
+[submodule "eth-amm/lib/v3-core"]
+	path = eth-amm/lib/v3-core
+	url = https://github.com/Uniswap/v3-core

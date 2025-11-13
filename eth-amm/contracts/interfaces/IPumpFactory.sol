@@ -22,15 +22,17 @@ interface IPumpFactory {
         uint16 refereeDiscountBasisPoints;
     }
 
-    /// @notice User's cashback account data
+    /// @notice User's reward account data
     /// @param totalVolume Cumulative trading volume across all curves (in USDC, 6 decimals)
     /// @param accumulatedCashback USDC cashback rewards ready to claim
     /// @param accumulatedReferral USDC referral rewards ready to claim (from L1/L2/L3)
+    /// @param accumulatedCreatorFee USDC creator fee rewards ready to claim (from created curves)
     /// @param lastClaimTimestamp Timestamp of last claim for cooldown tracking
-    struct CashbackAccount {
+    struct UserReward {
         uint256 totalVolume;
         uint256 accumulatedCashback;
         uint256 accumulatedReferral;
+        uint256 accumulatedCreatorFee;
         uint256 lastClaimTimestamp;
     }
 
@@ -110,9 +112,14 @@ interface IPumpFactory {
 
     /// @notice Emitted when creator fees are claimed
     /// @param creator The creator claiming fees
-    /// @param curve The curve address from which fees are claimed
     /// @param amount The USDC amount claimed
-    event CreatorFeeClaimed(address indexed creator, address indexed curve, uint256 amount);
+    event CreatorFeeClaimed(address indexed creator, uint256 amount);
+
+    /// @notice Emitted when creator fees are added to a creator's account
+    /// @param creator The creator receiving fees
+    /// @param amount The USDC fee amount added
+    /// @param curve The curve that generated this fee
+    event CreatorFeeAdded(address indexed creator, uint256 amount, address indexed curve);
 
     // ============ Errors ============
 
@@ -120,6 +127,7 @@ interface IPumpFactory {
     error InvalidReferrer();
     error CircularReferral();
     error NothingToClaim();
+    error ClaimCooldownActive();
     error InvalidTierConfiguration();
 
     // ============ Factory Functions ============
@@ -152,10 +160,10 @@ interface IPumpFactory {
 
     // ============ Cashback View Functions ============
 
-    /// @notice Get a user's cashback account data
+    /// @notice Get a user's reward account data
     /// @param user The user address
-    /// @return account The user's CashbackAccount struct
-    function getCashbackAccount(address user) external view returns (CashbackAccount memory account);
+    /// @return account The user's UserReward struct
+    function getUserReward(address user) external view returns (UserReward memory account);
 
     /// @notice Get a user's direct referrer (L1)
     /// @param user The user address
@@ -197,19 +205,17 @@ interface IPumpFactory {
     /// @return amount The USDC amount claimed
     function claimReferral() external returns (uint256 amount);
 
-    /// @notice Claim both cashback and referral rewards
+    /// @notice Claim creator fee, cashback and referral rewards
+    /// @return creatorFeeAmount The creator fee USDC amount claimed
     /// @return cashbackAmount The cashback USDC amount claimed
     /// @return referralAmount The referral USDC amount claimed
-    function claimAll() external returns (uint256 cashbackAmount, uint256 referralAmount);
+    function claimCreatorFeeCashbackAndReferral()
+        external
+        returns (uint256 creatorFeeAmount, uint256 cashbackAmount, uint256 referralAmount);
 
     /// @notice Claim accumulated protocol fees (owner only)
     /// @return amount The USDC amount claimed
     function claimProtocolFee() external returns (uint256 amount);
-
-    /// @notice Claim accumulated creator fees from a specific curve
-    /// @param curve The curve address to claim fees from
-    /// @return amount The USDC amount claimed
-    function claimCreatorFee(address curve) external returns (uint256 amount);
 
     // ============ Cashback Curve Functions ============
 
@@ -240,6 +246,7 @@ interface IPumpFactory {
     /// @notice Record fees from a trade and distribute to appropriate parties
     /// @dev Callable by authorized curves only. Handles volume tracking, cashback, protocol/creator fees, and referrals.
     /// @param user The trader address
+    /// @param creator The curve creator address
     /// @param volume The trade volume in quote token (USDC, 6 decimals)
     /// @param protocolFee The protocol fee amount from this trade (USDC, 6 decimals)
     /// @param creatorFee The creator fee amount from this trade (USDC, 6 decimals)
@@ -249,6 +256,7 @@ interface IPumpFactory {
     /// @param l3ReferralFee The L3 referral fee amount (USDC, 6 decimals)
     function addFees(
         address user,
+        address creator,
         uint256 volume,
         uint256 protocolFee,
         uint256 creatorFee,

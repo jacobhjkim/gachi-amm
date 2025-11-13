@@ -547,7 +547,7 @@ describe('Trading', () => {
 		test('accumulates protocol and creator fees', async () => {
 			const amountIn = parseUnits('100', 6)
 
-			const [protocolFeesBefore, creatorFeesBefore, { request }] = await Promise.all([
+			const [protocolFeesBefore, aliceRewardBefore, { request }] = await Promise.all([
 				client.readContract({
 					address: contracts.factory.address,
 					abi: contracts.factory.abi,
@@ -556,8 +556,8 @@ describe('Trading', () => {
 				client.readContract({
 					address: contracts.factory.address,
 					abi: contracts.factory.abi,
-					functionName: 'accumulatedCreatorFees',
-					args: [testCurveAddress],
+					functionName: 'getUserReward',
+					args: [accounts.alice.address], // Alice is the creator
 				}),
 				client.simulateContract({
 					account: accounts.alice,
@@ -579,7 +579,7 @@ describe('Trading', () => {
 
 			const swapEvent = logs[0]!.args
 
-			const [protocolFeesAfter, creatorFeesAfter] = await Promise.all([
+			const [protocolFeesAfter, aliceRewardAfter] = await Promise.all([
 				client.readContract({
 					address: contracts.factory.address,
 					abi: contracts.factory.abi,
@@ -588,10 +588,13 @@ describe('Trading', () => {
 				client.readContract({
 					address: contracts.factory.address,
 					abi: contracts.factory.abi,
-					functionName: 'accumulatedCreatorFees',
-					args: [testCurveAddress],
+					functionName: 'getUserReward',
+					args: [accounts.alice.address],
 				}),
 			])
+
+			const creatorFeesBefore = aliceRewardBefore.accumulatedCreatorFee
+			const creatorFeesAfter = aliceRewardAfter.accumulatedCreatorFee
 
 			console.log(`\n💰 Fee Accumulation:`)
 			console.log(`  Protocol fee: ${formatUnits(swapEvent.protocolFee, 6)} tokens`)

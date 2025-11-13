@@ -16,6 +16,9 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
     /// @notice Maximum basis points (100%)
     uint256 private constant MAX_BASIS_POINTS = 10_000;
 
+    /// @notice Cooldown period for claiming rewards (1 week)
+    uint256 private constant CLAIM_COOLDOWN = 1 weeks;
+
     // ============ Factory Storage ============
 
     /// @inheritdoc IPumpFactory
@@ -29,8 +32,8 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
 
     // ============ Cashback Storage ============
 
-    /// @notice User cashback accounts
-    mapping(address => CashbackAccount) private accounts;
+    /// @notice User reward accounts
+    mapping(address => UserReward) private accounts;
 
     /// @notice Referral links: user => referrer (L1)
     mapping(address => address) public referrals;
@@ -42,9 +45,6 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
 
     /// @notice Accumulated protocol fees (in quote tokens)
     uint256 public accumulatedProtocolFees;
-
-    /// @notice Accumulated creator fees per curve (curve address => creator fees)
-    mapping(address => uint256) public accumulatedCreatorFees;
 
     constructor(address _quoteToken) Ownable(msg.sender) {
         require(_quoteToken != address(0), "Invalid quote token");
@@ -138,8 +138,9 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
 
         // Step 1: Deploy token with factory as temporary recipient
         // This breaks the circular dependency between token and curve addresses
+        // Pass factory address to enable setCurve and transfer restrictions
         bytes memory tokenInitCode =
-            abi.encodePacked(type(PumpToken).creationCode, abi.encode(name, symbol, address(this)));
+            abi.encodePacked(type(PumpToken).creationCode, abi.encode(name, symbol, address(this), address(this)));
 
         assembly {
             token := create2(0, add(tokenInitCode, 0x20), mload(tokenInitCode), tokenSalt)
@@ -155,7 +156,10 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
             if iszero(curve) { revert(0, 0) }
         }
 
-        // Step 3: Transfer all tokens from factory to curve
+        // Step 3: Set the curve address on the token (enables transfer restrictions)
+        PumpToken(token).setCurve(curve);
+
+        // Step 4: Transfer all tokens from factory to curve
         require(PumpToken(token).transfer(curve, PumpToken(token).TOTAL_SUPPLY()), "Token transfer failed");
 
         // Store the mapping
@@ -170,7 +174,7 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
     // ============ Cashback View Functions ============
 
     /// @inheritdoc IPumpFactory
-    function getCashbackAccount(address user) external view returns (CashbackAccount memory) {
+    function getUserReward(address user) external view returns (UserReward memory) {
         return accounts[user];
     }
 
@@ -234,7 +238,13 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
 
     /// @inheritdoc IPumpFactory
     function claimCashback() external nonReentrant returns (uint256 amount) {
-        CashbackAccount storage account = accounts[msg.sender];
+        UserReward storage account = accounts[msg.sender];
+
+        // Check cooldown
+        if (block.timestamp < account.lastClaimTimestamp + CLAIM_COOLDOWN) {
+            revert ClaimCooldownActive();
+        }
+
         amount = account.accumulatedCashback;
 
         if (amount == 0) revert NothingToClaim();
@@ -250,7 +260,13 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
 
     /// @inheritdoc IPumpFactory
     function claimReferral() external nonReentrant returns (uint256 amount) {
-        CashbackAccount storage account = accounts[msg.sender];
+        UserReward storage account = accounts[msg.sender];
+
+        // Check cooldown
+        if (block.timestamp < account.lastClaimTimestamp + CLAIM_COOLDOWN) {
+            revert ClaimCooldownActive();
+        }
+
         amount = account.accumulatedReferral;
 
         if (amount == 0) revert NothingToClaim();
@@ -265,20 +281,37 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
     }
 
     /// @inheritdoc IPumpFactory
-    function claimAll() external nonReentrant returns (uint256 cashbackAmount, uint256 referralAmount) {
-        CashbackAccount storage account = accounts[msg.sender];
+    function claimCreatorFeeCashbackAndReferral()
+        external
+        nonReentrant
+        returns (uint256 creatorFeeAmount, uint256 cashbackAmount, uint256 referralAmount)
+    {
+        UserReward storage account = accounts[msg.sender];
+
+        // Check cooldown
+        if (block.timestamp < account.lastClaimTimestamp + CLAIM_COOLDOWN) {
+            revert ClaimCooldownActive();
+        }
+
+        creatorFeeAmount = account.accumulatedCreatorFee;
         cashbackAmount = account.accumulatedCashback;
         referralAmount = account.accumulatedReferral;
 
-        if (cashbackAmount == 0 && referralAmount == 0) revert NothingToClaim();
+        if (creatorFeeAmount == 0 && cashbackAmount == 0 && referralAmount == 0) {
+            revert NothingToClaim();
+        }
 
+        account.accumulatedCreatorFee = 0;
         account.accumulatedCashback = 0;
         account.accumulatedReferral = 0;
         account.lastClaimTimestamp = block.timestamp;
 
-        uint256 totalAmount = cashbackAmount + referralAmount;
+        uint256 totalAmount = creatorFeeAmount + cashbackAmount + referralAmount;
         require(IERC20(quoteToken).transfer(msg.sender, totalAmount), "USDC transfer failed");
 
+        if (creatorFeeAmount > 0) {
+            emit CreatorFeeClaimed(msg.sender, creatorFeeAmount);
+        }
         if (cashbackAmount > 0) {
             emit CashbackClaimed(msg.sender, cashbackAmount);
         }
@@ -286,43 +319,10 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
             emit ReferralClaimed(msg.sender, referralAmount);
         }
 
-        return (cashbackAmount, referralAmount);
+        return (creatorFeeAmount, cashbackAmount, referralAmount);
     }
 
-    /// @inheritdoc IPumpFactory
-    function claimProtocolFee() external onlyOwner nonReentrant returns (uint256 amount) {
-        amount = accumulatedProtocolFees;
-
-        if (amount == 0) revert NothingToClaim();
-
-        accumulatedProtocolFees = 0;
-
-        require(IERC20(quoteToken).transfer(msg.sender, amount), "USDC transfer failed");
-
-        emit ProtocolFeeClaimed(msg.sender, amount);
-        return amount;
-    }
-
-    /// @inheritdoc IPumpFactory
-    function claimCreatorFee(address curve) external nonReentrant returns (uint256 amount) {
-        // Verify the curve exists and caller is the creator
-        address baseToken = PumpCurve(curve).baseToken();
-        require(getCurve[baseToken] == curve, "Invalid curve");
-        require(PumpCurve(curve).creator() == msg.sender, "Not the creator");
-
-        amount = accumulatedCreatorFees[curve];
-
-        if (amount == 0) revert NothingToClaim();
-
-        accumulatedCreatorFees[curve] = 0;
-
-        require(IERC20(quoteToken).transfer(msg.sender, amount), "USDC transfer failed");
-
-        emit CreatorFeeClaimed(msg.sender, curve, amount);
-        return amount;
-    }
-
-    // ============ Cashback Curve Functions ============
+    // ============ Curve Functions ============
 
     /// @inheritdoc IPumpFactory
     function calculateFees(address user, uint256 tradeAmount)
@@ -388,6 +388,7 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
     /// @inheritdoc IPumpFactory
     function addFees(
         address user,
+        address creator,
         uint256 volume,
         uint256 protocolFee,
         uint256 creatorFee,
@@ -400,7 +401,7 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
         address baseToken = PumpCurve(msg.sender).baseToken();
         require(getCurve[baseToken] == msg.sender, "Unauthorized: not a factory curve");
 
-        CashbackAccount storage account = accounts[user];
+        UserReward storage account = accounts[user];
 
         // Calculate total fee amount for cashback/referral calculations
         uint256 totalFeeAmount = protocolFee + creatorFee + cashbackFee + l1ReferralFee + l2ReferralFee + l3ReferralFee;
@@ -422,7 +423,8 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
             accumulatedProtocolFees += protocolFee;
         }
         if (creatorFee > 0) {
-            accumulatedCreatorFees[msg.sender] += creatorFee;
+            accounts[creator].accumulatedCreatorFee += creatorFee;
+            emit CreatorFeeAdded(creator, creatorFee, msg.sender);
         }
 
         // 4. Distribute referral rewards (L1, L2, L3)
@@ -454,7 +456,21 @@ contract PumpFactory is IPumpFactory, Ownable2Step, ReentrancyGuard {
         }
     }
 
-    // ============ Cashback Admin Functions ============
+    // ============ Admin Functions ============
+
+    /// @inheritdoc IPumpFactory
+    function claimProtocolFee() external onlyOwner nonReentrant returns (uint256 amount) {
+        amount = accumulatedProtocolFees;
+
+        if (amount == 0) revert NothingToClaim();
+
+        accumulatedProtocolFees = 0;
+
+        require(IERC20(quoteToken).transfer(msg.sender, amount), "USDC transfer failed");
+
+        emit ProtocolFeeClaimed(msg.sender, amount);
+        return amount;
+    }
 
     /// @inheritdoc IPumpFactory
     function updateTier(uint8 tierIndex, uint256 volumeThreshold, uint16 cashbackBasisPoints) external onlyOwner {

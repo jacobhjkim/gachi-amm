@@ -6,6 +6,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IPumpFactory} from "./interfaces/IPumpFactory.sol";
 import {IPumpCurve} from "./interfaces/IPumpCurve.sol";
+import {PumpToken} from "./PumpToken.sol";
 
 /**
  * @title PumpCurve
@@ -153,8 +154,9 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
                 newVirtualQuoteReserve = GRADUATION_THRESHOLD;
                 newVirtualBaseReserve = newVirtualBase;
 
-                // Mark as graduated
+                // Mark as graduated and notify token
                 graduated = true;
+                PumpToken(baseToken).graduate();
             } else {
                 // Normal trade: calculate new virtual reserves
                 newVirtualQuoteReserve = cache.virtualQuoteReserve + actualAmountIn;
@@ -225,6 +227,7 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
         uint256 quoteVolume = quoteToBase ? amountIn : (amountOut + fees.totalFee);
         IPumpFactory(factory).addFees(
             msg.sender,
+            creator,
             quoteVolume,
             fees.protocolFee,
             fees.creatorFee,

@@ -9,9 +9,8 @@ import {
 	concat,
 	pad,
 	getContractAddress,
-	encodePacked,
 } from 'viem'
-import { createTestPublicClient, createTestWalletClient, checkAnvilConnection, anvilChain } from './libs/setup.ts'
+import { createTestPublicClient, createTestWalletClient, checkAnvilConnection } from './libs/setup.ts'
 import { type DeployedContracts, loadDeployedContracts } from './libs/contracts.ts'
 import { getAllAccounts } from './libs/accounts.ts'
 import { randomBytes } from 'crypto'
@@ -572,8 +571,8 @@ describe('Factory', () => {
 				const tokenBytecode = concat([
 					contracts.token.bytecode as Hex,
 					encodeAbiParameters(
-						[{ type: 'string' }, { type: 'string' }, { type: 'address' }],
-						[tokenName, tokenSymbol, contracts.factory.address],
+						[{ type: 'string' }, { type: 'string' }, { type: 'address' }, { type: 'address' }],
+						[tokenName, tokenSymbol, contracts.factory.address, contracts.factory.address],
 					),
 				])
 
@@ -620,8 +619,8 @@ describe('Factory', () => {
 				const tokenBytecode = concat([
 					contracts.token.bytecode as Hex,
 					encodeAbiParameters(
-						[{ type: 'string' }, { type: 'string' }, { type: 'address' }],
-						[tokenName, tokenSymbol, contracts.factory.address],
+						[{ type: 'string' }, { type: 'string' }, { type: 'address' }, { type: 'address' }],
+						[tokenName, tokenSymbol, contracts.factory.address, contracts.factory.address],
 					),
 				])
 				const predictedTokenAddress = getContractAddress({
@@ -688,7 +687,7 @@ describe('Factory', () => {
 				await client.waitForTransactionReceipt({ hash: hash1 })
 
 				// Second deployment with same requestId and params should fail
-				await expect(
+				expect(
 					client.simulateContract({
 						account: accounts.admin,
 						address: contracts.factory.address,
