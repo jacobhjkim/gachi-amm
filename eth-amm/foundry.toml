@@ -3,6 +3,7 @@ src = "contracts"
 out = "out"
 libs = ["lib"]
 solc_version = "0.8.30"
+auto_detect_solc = true
 remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
     "@uniswap/v3-core/=lib/v3-core/"
@@ -10,12 +11,36 @@ remappings = [
 optimizer = true
 optimizer_runs = 200
 via_ir = true
-
-# Exclude legacy and test directories from compilation
-exclude = ["src-legacy/**", "test/**", "script/Deploy.s.sol"]
+evm_version = "cancun"
 
 # Allow scripts to write deployment addresses
 fs_permissions = [{ access = "read-write", path = "./deployments" }]
 
+# profile 0_7_6 is ONLY used for testing
+[profile.0_7_6]
+src = 'lib-0_7_6'
+out = 'out'
+# The order matters! When using `forge install` with FOUNDRY_PROFILE=0_6_x,
+# it will use the first directory as the installation path.
+# If the library is compatible with all versions,
+# you can install it with the default profile.
+libs = ['lib-0_7_6', 'lib']
+remappings = [
+    "@uniswap/v3-core/=lib-0_7_6/v3-core/",
+    "@uniswap/v3-periphery/=lib-0_7_6/v3-periphery/",
+    "@openzeppelin/contracts/=lib-0_7_6/openzeppelin-contracts/contracts/"
+]
+# Exclude v3-periphery contracts with missing dependencies (we only need v3-core for migration testing)
+ignored_error_codes = [6275]
+deny_warnings = false
+optimizer = true
+optimizer_runs = 200
+via_ir = false
+solc_version = '0.7.6'
+evm_version = "cancun"
+
 [lint]
 exclude_lints = ["screaming-snake-case-immutable"]
+exclude = [
+    "test/**",
+]

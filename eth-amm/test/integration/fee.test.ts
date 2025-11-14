@@ -1,11 +1,11 @@
-import { describe, test, expect, beforeAll, beforeEach } from 'bun:test'
+import { describe, test, expect, beforeAll, afterEach, beforeEach } from 'bun:test'
 import { type Address, type Hex, parseUnits, formatUnits, parseEventLogs } from 'viem'
 import { createTestPublicClient, createTestWalletClient, checkAnvilConnection } from './libs/setup.ts'
 import { type DeployedContracts, loadDeployedContracts } from './libs/contracts.ts'
 import { getAllAccounts } from './libs/accounts.ts'
 import { randomBytes } from 'crypto'
 
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address
+const BIG_NUMBER = 2n ** 100n
 
 // Helper function to generate random requestId
 const generateRequestId = () => `0x${randomBytes(32).toString('hex')}` as Hex
@@ -29,7 +29,6 @@ describe('Fee Math', () => {
 	let walletClient: ReturnType<typeof createTestWalletClient>
 	let contracts: DeployedContracts
 	let accounts: ReturnType<typeof getAllAccounts>
-	let snapshotId: Hex
 
 	// Token and curve addresses for tests
 	let testTokenAddress: Address
@@ -55,48 +54,124 @@ describe('Fee Math', () => {
 		return { token, curve }
 	}
 
+	// Helper function to get full referral chain for a user
+	async function getFullReferralChain(user: Address): Promise<Address[]> {
+		const chain: Address[] = []
+		let current = user
+		for (let i = 0; i < 3; i++) {
+			const referrer = await client.readContract({
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
+				functionName: 'getReferrer',
+				args: [current],
+			})
+			if (referrer === '0x0000000000000000000000000000000000000000') break
+			chain.push(referrer)
+			current = referrer
+		}
+		return chain
+	}
+
 	// Helper function to setup referral chain: user -> l1 -> l2 -> l3
+	// This function is idempotent - it will skip setting referrers if they would create circular references
 	async function setupReferralChain(user: Address, l1: Address, l2?: Address, l3?: Address) {
-		// Set user -> l1
-		const { request: r1 } = await client.simulateContract({
-			account: { address: user } as any,
-			address: contracts.factory.address,
-			abi: contracts.factory.abi,
-			functionName: 'setReferrer',
-			args: [l1],
+		// Get existing referral chains for all participants
+		const [userChain, l1Chain, l2Chain] = await Promise.all([
+			getFullReferralChain(user),
+			getFullReferralChain(l1),
+			l2 ? getFullReferralChain(l2) : Promise.resolve([]),
+		])
+
+		// Check if user already has a referrer
+		const existingReferrer = await client.readContract({
+			address: contracts.reward.address,
+			abi: contracts.reward.abi,
+			functionName: 'getReferrer',
+			args: [user],
 		})
-		const account =
-			accounts.alice.address === user ? accounts.alice : accounts.bob.address === user ? accounts.bob : accounts.charlie
-		const hash1 = await walletClient.writeContract({ ...r1, account })
-		await client.waitForTransactionReceipt({ hash: hash1 })
+
+		// Set user -> l1 only if not already set AND it won't create a circular reference
+		// Check if l1 is already in user's chain (would be circular)
+		const wouldBeCircular = l1Chain.some((addr) => addr.toLowerCase() === user.toLowerCase())
+
+		if (existingReferrer === '0x0000000000000000000000000000000000000000' && !wouldBeCircular) {
+			const { request: r1 } = await client.simulateContract({
+				account: { address: user } as any,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
+				functionName: 'setReferrer',
+				args: [l1],
+			})
+			const account =
+				accounts.alice.address === user
+					? accounts.alice
+					: accounts.bob.address === user
+						? accounts.bob
+						: accounts.charlie
+			const hash1 = await walletClient.writeContract({ ...r1, account })
+			await client.waitForTransactionReceipt({ hash: hash1 })
+		}
 
 		// Set l1 -> l2 if provided
 		if (l2) {
-			const l1Account =
-				accounts.bob.address === l1 ? accounts.bob : accounts.charlie.address === l1 ? accounts.charlie : accounts.dave
-			const { request: r2 } = await client.simulateContract({
-				account: l1Account,
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'setReferrer',
-				args: [l2],
+			const l1ExistingReferrer = await client.readContract({
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
+				functionName: 'getReferrer',
+				args: [l1],
 			})
-			const hash2 = await walletClient.writeContract({ ...r2, account: l1Account })
-			await client.waitForTransactionReceipt({ hash: hash2 })
+
+			// Check if l2 would create a circular reference
+			const l1WouldBeCircular =
+				l2Chain.some((addr) => addr.toLowerCase() === l1.toLowerCase()) || l2.toLowerCase() === user.toLowerCase()
+
+			if (l1ExistingReferrer === '0x0000000000000000000000000000000000000000' && !l1WouldBeCircular) {
+				const l1Account =
+					accounts.bob.address === l1
+						? accounts.bob
+						: accounts.charlie.address === l1
+							? accounts.charlie
+							: accounts.dave
+				const { request: r2 } = await client.simulateContract({
+					account: l1Account,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
+					functionName: 'setReferrer',
+					args: [l2],
+				})
+				const hash2 = await walletClient.writeContract({ ...r2, account: l1Account })
+				await client.waitForTransactionReceipt({ hash: hash2 })
+			}
 		}
 
 		// Set l2 -> l3 if provided
 		if (l2 && l3) {
-			const l2Account = accounts.charlie.address === l2 ? accounts.charlie : accounts.dave
-			const { request: r3 } = await client.simulateContract({
-				account: l2Account,
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'setReferrer',
-				args: [l3],
+			const l2ExistingReferrer = await client.readContract({
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
+				functionName: 'getReferrer',
+				args: [l2],
 			})
-			const hash3 = await walletClient.writeContract({ ...r3, account: l2Account })
-			await client.waitForTransactionReceipt({ hash: hash3 })
+
+			const l3Chain = await getFullReferralChain(l3)
+			// Check if l3 would create a circular reference
+			const l2WouldBeCircular =
+				l3Chain.some((addr) => addr.toLowerCase() === l2.toLowerCase()) ||
+				l3.toLowerCase() === l1.toLowerCase() ||
+				l3.toLowerCase() === user.toLowerCase()
+
+			if (l2ExistingReferrer === '0x0000000000000000000000000000000000000000' && !l2WouldBeCircular) {
+				const l2Account = accounts.charlie.address === l2 ? accounts.charlie : accounts.dave
+				const { request: r3 } = await client.simulateContract({
+					account: l2Account,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
+					functionName: 'setReferrer',
+					args: [l3],
+				})
+				const hash3 = await walletClient.writeContract({ ...r3, account: l2Account })
+				await client.waitForTransactionReceipt({ hash: hash3 })
+			}
 		}
 	}
 
@@ -167,6 +242,98 @@ describe('Fee Math', () => {
 		return logs[0]!.args
 	}
 
+	// Helper function to snapshot all relevant state for delta comparisons
+	async function snapshotState() {
+		const [protocolFees, aliceReward, bobReward, charlieReward, daveReward, aliceTier, bobTier, charlieTier, daveTier] =
+			await Promise.all([
+				client.readContract({
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
+					functionName: 'accumulatedProtocolFees',
+				}),
+				client.readContract({
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
+					functionName: 'getUserReward',
+					args: [accounts.alice.address],
+				}),
+				client.readContract({
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
+					functionName: 'getUserReward',
+					args: [accounts.bob.address],
+				}),
+				client.readContract({
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
+					functionName: 'getUserReward',
+					args: [accounts.charlie.address],
+				}),
+				client.readContract({
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
+					functionName: 'getUserReward',
+					args: [accounts.dave.address],
+				}),
+				client.readContract({
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
+					functionName: 'getCurrentTier',
+					args: [accounts.alice.address],
+				}),
+				client.readContract({
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
+					functionName: 'getCurrentTier',
+					args: [accounts.bob.address],
+				}),
+				client.readContract({
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
+					functionName: 'getCurrentTier',
+					args: [accounts.charlie.address],
+				}),
+				client.readContract({
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
+					functionName: 'getCurrentTier',
+					args: [accounts.dave.address],
+				}),
+			])
+
+		return {
+			protocolFees,
+			alice: {
+				accumulatedCreatorFee: aliceReward.accumulatedCreatorFee,
+				accumulatedCashback: aliceReward.accumulatedCashback,
+				accumulatedReferral: aliceReward.accumulatedReferral,
+				totalVolume: aliceReward.totalVolume,
+				currentTier: aliceTier,
+			},
+			bob: {
+				accumulatedCreatorFee: bobReward.accumulatedCreatorFee,
+				accumulatedCashback: bobReward.accumulatedCashback,
+				accumulatedReferral: bobReward.accumulatedReferral,
+				totalVolume: bobReward.totalVolume,
+				currentTier: bobTier,
+			},
+			charlie: {
+				accumulatedCreatorFee: charlieReward.accumulatedCreatorFee,
+				accumulatedCashback: charlieReward.accumulatedCashback,
+				accumulatedReferral: charlieReward.accumulatedReferral,
+				totalVolume: charlieReward.totalVolume,
+				currentTier: charlieTier,
+			},
+			dave: {
+				accumulatedCreatorFee: daveReward.accumulatedCreatorFee,
+				accumulatedCashback: daveReward.accumulatedCashback,
+				accumulatedReferral: daveReward.accumulatedReferral,
+				totalVolume: daveReward.totalVolume,
+				currentTier: daveTier,
+			},
+		}
+	}
+
 	beforeAll(async () => {
 		// Check anvil connection
 		const isConnected = await checkAnvilConnection()
@@ -178,32 +345,23 @@ describe('Fee Math', () => {
 		walletClient = createTestWalletClient()
 		accounts = getAllAccounts()
 		contracts = await loadDeployedContracts()
-
-		// Take snapshot AFTER contracts are loaded to capture clean state
-		snapshotId = await client.snapshot()
 	})
 
 	beforeEach(async () => {
-		// Revert to clean Factory state
-		await client.revert({ id: snapshotId })
-		// Take new snapshot for next test
-		snapshotId = await client.snapshot()
-
 		// Create a fresh token and curve for each test
 		const { token, curve } = await createTokenAndCurve(accounts.alice)
 		testTokenAddress = token
 		testCurveAddress = curve
 
 		// Mint and approve USDC for all test accounts
-		const mintAmount = parseUnits('1000000', 6) // 1M USDC each
 		for (const account of [accounts.alice, accounts.bob, accounts.charlie, accounts.dave]) {
-			await mintAndApproveUSDC(account, mintAmount, testCurveAddress)
+			await mintAndApproveUSDC(account, BigInt(10 * 10 ** 15), testCurveAddress)
 		}
 	})
 
 	describe('Basic Fee Calculation', () => {
 		test('calculates 1.5% total fee without referral', async () => {
-			const amountIn = parseUnits('1000', 6) // 1000 USDC
+			const amountIn = BigInt(1000 * 10 ** 6) // 1000 USDC
 
 			const swapEvent = await executeBuy(accounts.alice, testCurveAddress, amountIn)
 
@@ -217,7 +375,7 @@ describe('Fee Math', () => {
 			// Setup: Alice refers Bob
 			await setupReferralChain(accounts.bob.address, accounts.alice.address)
 
-			const amountIn = parseUnits('1000', 6) // 1000 USDC
+			const amountIn = BigInt(1000 * 10 ** 6) // 1000 USDC
 			const swapEvent = await executeBuy(accounts.bob, testCurveAddress, amountIn)
 
 			// Calculate expected fee: (1.5% - 0.1%) = 1.4% of 1000 = 14 USDC
@@ -228,49 +386,40 @@ describe('Fee Math', () => {
 		})
 
 		test('fee components sum correctly without referral', async () => {
-			const amountIn = parseUnits('1000', 6) // 1000 USDC
+			const before = await snapshotState()
+
+			const amountIn = BigInt(1000 * 10 ** 6) // 1000 USDC
 			const swapEvent = await executeBuy(accounts.alice, testCurveAddress, amountIn)
 
-			// Read factory to get fee accumulation (creator fees are now stored in creator's UserReward)
-			const [protocolFees, aliceReward] = await Promise.all([
-				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
-					functionName: 'accumulatedProtocolFees',
-				}),
-				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
-					functionName: 'getUserReward',
-					args: [accounts.alice.address], // Alice is the creator of testCurve
-				}),
-			])
+			const after = await snapshotState()
 
-			// Creator fee should be 0.5% of amountIn
+			// Creator fee delta should be 0.5% of amountIn
 			const expectedCreatorFee = (amountIn * BigInt(CREATOR_FEE_BP)) / BigInt(MAX_BP)
-			expect(aliceReward.accumulatedCreatorFee).toBe(expectedCreatorFee)
+			const creatorFeeDelta = after.alice.accumulatedCreatorFee - before.alice.accumulatedCreatorFee
+			expect(creatorFeeDelta).toBe(expectedCreatorFee)
 
 			// Verify trading fee is correct
 			expect(swapEvent.tradingFee).toBeGreaterThan(0n)
 
-			// Verify protocol fees are tracked
-			expect(protocolFees).toBeGreaterThan(0n)
+			// Verify protocol fees increased
+			const protocolFeeDelta = after.protocolFees - before.protocolFees
+			expect(protocolFeeDelta).toBeGreaterThan(0n)
 		})
 
 		test('protocol fee absorbs rounding dust', async () => {
 			// Use an amount that will cause rounding
-			const amountIn = parseUnits('1001', 6) + 7n // Odd amount to test rounding
+			const amountIn = BigInt(1001 * 10 ** 6 + 7) // 1000 USDC
 
 			// Snapshot fees before trade
 			const [protocolFeesBefore, aliceRewardBefore] = await Promise.all([
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'accumulatedProtocolFees',
 				}),
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'getUserReward',
 					args: [accounts.alice.address], // Alice is the creator
 				}),
@@ -281,13 +430,13 @@ describe('Fee Math', () => {
 			// Read fees from factory after trade
 			const [protocolFeesAfter, aliceRewardAfter] = await Promise.all([
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'accumulatedProtocolFees',
 				}),
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'getUserReward',
 					args: [accounts.alice.address],
 				}),
@@ -379,53 +528,41 @@ describe('Fee Math', () => {
 			// Setup: Bob refers Alice
 			await setupReferralChain(accounts.alice.address, accounts.bob.address)
 
+			const before = await snapshotState()
+
 			const amountIn = parseUnits('10000', 6) // 10k USDC
 			const swapEvent = await executeBuy(accounts.alice, testCurveAddress, amountIn)
 
-			// Check Bob's (L1) referral rewards
-			const bobAccount = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'getUserReward',
-				args: [accounts.bob.address],
-			})
+			const after = await snapshotState()
 
 			// L1 gets 0.3% of the TOTAL FEE (not 0.3% of trade amount)
 			// Total fee = 1.4% of 10k = 140 USDC (with referee discount)
 			// L1 reward = 0.3% of 140 = 0.42 USDC
 			const expectedL1Reward = (swapEvent.tradingFee * BigInt(L1_REFERRAL_FEE_BP)) / BigInt(MAX_BP)
-			expect(bobAccount.accumulatedReferral).toBe(expectedL1Reward)
+			const bobReferralDelta = after.bob.accumulatedReferral - before.bob.accumulatedReferral
+			expect(bobReferralDelta).toBe(expectedL1Reward)
 		})
 
 		test('2-level referral chain distributes L1 and L2 rewards', async () => {
 			// Setup: Alice -> Bob -> Charlie
 			await setupReferralChain(accounts.alice.address, accounts.bob.address, accounts.charlie.address)
 
+			const before = await snapshotState()
+
 			const amountIn = parseUnits('10000', 6) // 10k USDC
 			const swapEvent = await executeBuy(accounts.alice, testCurveAddress, amountIn)
 
-			// Check Bob's (L1) rewards
-			const bobAccount = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'getUserReward',
-				args: [accounts.bob.address],
-			})
-
-			// Check Charlie's (L2) rewards
-			const charlieAccount = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'getUserReward',
-				args: [accounts.charlie.address],
-			})
+			const after = await snapshotState()
 
 			// L1 gets 0.3% of total fee, L2 gets 0.03% of total fee
 			const expectedL1Reward = (swapEvent.tradingFee * BigInt(L1_REFERRAL_FEE_BP)) / BigInt(MAX_BP)
 			const expectedL2Reward = (swapEvent.tradingFee * BigInt(L2_REFERRAL_FEE_BP)) / BigInt(MAX_BP)
 
-			expect(bobAccount.accumulatedReferral).toBe(expectedL1Reward)
-			expect(charlieAccount.accumulatedReferral).toBe(expectedL2Reward)
+			const bobReferralDelta = after.bob.accumulatedReferral - before.bob.accumulatedReferral
+			const charlieReferralDelta = after.charlie.accumulatedReferral - before.charlie.accumulatedReferral
+
+			expect(bobReferralDelta).toBe(expectedL1Reward)
+			expect(charlieReferralDelta).toBe(expectedL2Reward)
 		})
 
 		test('3-level referral chain distributes L1, L2, and L3 rewards', async () => {
@@ -437,43 +574,31 @@ describe('Fee Math', () => {
 				accounts.dave.address,
 			)
 
+			const before = await snapshotState()
+
 			const amountIn = parseUnits('10000', 6) // 10k USDC
 			const swapEvent = await executeBuy(accounts.alice, testCurveAddress, amountIn)
 
-			// Check all referrers' rewards
-			const [bobAccount, charlieAccount, daveAccount] = await Promise.all([
-				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
-					functionName: 'getUserReward',
-					args: [accounts.bob.address],
-				}),
-				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
-					functionName: 'getUserReward',
-					args: [accounts.charlie.address],
-				}),
-				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
-					functionName: 'getUserReward',
-					args: [accounts.dave.address],
-				}),
-			])
+			const after = await snapshotState()
 
 			// Calculate expected rewards (all based on total fee)
 			const expectedL1Reward = (swapEvent.tradingFee * BigInt(L1_REFERRAL_FEE_BP)) / BigInt(MAX_BP)
 			const expectedL2Reward = (swapEvent.tradingFee * BigInt(L2_REFERRAL_FEE_BP)) / BigInt(MAX_BP)
 			const expectedL3Reward = (swapEvent.tradingFee * BigInt(L3_REFERRAL_FEE_BP)) / BigInt(MAX_BP)
 
-			expect(bobAccount.accumulatedReferral).toBe(expectedL1Reward)
-			expect(charlieAccount.accumulatedReferral).toBe(expectedL2Reward)
-			expect(daveAccount.accumulatedReferral).toBe(expectedL3Reward)
+			const bobReferralDelta = after.bob.accumulatedReferral - before.bob.accumulatedReferral
+			const charlieReferralDelta = after.charlie.accumulatedReferral - before.charlie.accumulatedReferral
+			const daveReferralDelta = after.dave.accumulatedReferral - before.dave.accumulatedReferral
+
+			expect(bobReferralDelta).toBe(expectedL1Reward)
+			expect(charlieReferralDelta).toBe(expectedL2Reward)
+			expect(daveReferralDelta).toBe(expectedL3Reward)
 		})
 
 		test('referral rewards accumulate across multiple trades', async () => {
 			await setupReferralChain(accounts.alice.address, accounts.bob.address)
+
+			const before = await snapshotState()
 
 			const amountIn = parseUnits('1000', 6) // 1k USDC per trade
 			let totalExpectedReward = 0n
@@ -484,15 +609,11 @@ describe('Fee Math', () => {
 				totalExpectedReward += (swapEvent.tradingFee * BigInt(L1_REFERRAL_FEE_BP)) / BigInt(MAX_BP)
 			}
 
-			// Check Bob's accumulated rewards
-			const bobAccount = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'getUserReward',
-				args: [accounts.bob.address],
-			})
+			const after = await snapshotState()
 
-			expect(bobAccount.accumulatedReferral).toBe(totalExpectedReward)
+			// Check Bob's accumulated rewards delta
+			const bobReferralDelta = after.bob.accumulatedReferral - before.bob.accumulatedReferral
+			expect(bobReferralDelta).toBe(totalExpectedReward)
 		})
 
 		test('can claim accumulated referral rewards', async () => {
@@ -501,7 +622,14 @@ describe('Fee Math', () => {
 			const amountIn = parseUnits('10000', 6)
 			const swapEvent = await executeBuy(accounts.alice, testCurveAddress, amountIn)
 
-			const expectedReward = (swapEvent.tradingFee * BigInt(L1_REFERRAL_FEE_BP)) / BigInt(MAX_BP)
+			// Read Bob's actual accumulated referral amount (includes any from previous tests)
+			const bobAccountBeforeClaim = await client.readContract({
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
+				functionName: 'getUserReward',
+				args: [accounts.bob.address],
+			})
+			const totalAccumulated = bobAccountBeforeClaim.accumulatedReferral
 
 			// Check Bob's USDC balance before claim
 			const bobUsdcBefore = await client.readContract({
@@ -514,8 +642,8 @@ describe('Fee Math', () => {
 			// Claim referral rewards
 			const { request: claimReq } = await client.simulateContract({
 				account: accounts.bob,
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'claimReferral',
 			})
 			const claimHash = await walletClient.writeContract(claimReq)
@@ -529,16 +657,17 @@ describe('Fee Math', () => {
 				args: [accounts.bob.address],
 			})
 
-			expect(bobUsdcAfter - bobUsdcBefore).toBe(expectedReward)
+			// Should receive all accumulated referral rewards
+			expect(bobUsdcAfter - bobUsdcBefore).toBe(totalAccumulated)
 
 			// Account should be zeroed after claim
-			const bobAccount = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+			const bobAccountAfterClaim = await client.readContract({
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getUserReward',
 				args: [accounts.bob.address],
 			})
-			expect(bobAccount.accumulatedReferral).toBe(0n)
+			expect(bobAccountAfterClaim.accumulatedReferral).toBe(0n)
 		})
 	})
 
@@ -547,8 +676,8 @@ describe('Fee Math', () => {
 			const amountIn = parseUnits('1000', 6)
 
 			const accountBefore = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getUserReward',
 				args: [accounts.alice.address],
 			})
@@ -556,8 +685,8 @@ describe('Fee Math', () => {
 			await executeBuy(accounts.alice, testCurveAddress, amountIn)
 
 			const accountAfter = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getUserReward',
 				args: [accounts.alice.address],
 			})
@@ -567,17 +696,28 @@ describe('Fee Math', () => {
 		})
 
 		test('volume increases after sell trade', async () => {
+			// Get volume before trading
+			const accountBeforeBuy = await client.readContract({
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
+				functionName: 'getUserReward',
+				args: [accounts.alice.address],
+			})
+
 			// First buy some tokens
 			const buyAmount = parseUnits('1000', 6)
 			const buySwap = await executeBuy(accounts.alice, testCurveAddress, buyAmount)
 
 			// Get volume after buy
 			const accountAfterBuy = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getUserReward',
 				args: [accounts.alice.address],
 			})
+
+			// Verify buy volume increased correctly
+			expect(accountAfterBuy.totalVolume - accountBeforeBuy.totalVolume).toBe(buyAmount)
 
 			// Approve tokens for selling
 			const tokensToSell = buySwap.amountOut / 2n
@@ -594,8 +734,8 @@ describe('Fee Math', () => {
 			const sellSwap = await executeSell(accounts.alice, testCurveAddress, tokensToSell)
 
 			const accountAfterSell = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getUserReward',
 				args: [accounts.alice.address],
 			})
@@ -607,8 +747,8 @@ describe('Fee Math', () => {
 
 		test('volume accumulates across multiple trades', async () => {
 			const accountBefore = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getUserReward',
 				args: [accounts.alice.address],
 			})
@@ -622,8 +762,8 @@ describe('Fee Math', () => {
 			}
 
 			const accountAfter = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getUserReward',
 				args: [accounts.alice.address],
 			})
@@ -632,6 +772,8 @@ describe('Fee Math', () => {
 		})
 
 		test('volume accumulates across different curves', async () => {
+			const before = await snapshotState()
+
 			// Trade on first curve
 			const amount1 = parseUnits('1000', 6)
 			await executeBuy(accounts.alice, testCurveAddress, amount1)
@@ -644,24 +786,19 @@ describe('Fee Math', () => {
 			const amount2 = parseUnits('2000', 6)
 			await executeBuy(accounts.alice, curve2, amount2)
 
-			// Check total volume
-			const accountAfter = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'getUserReward',
-				args: [accounts.alice.address],
-			})
+			const after = await snapshotState()
 
-			// Volume should include both trades
-			expect(accountAfter.totalVolume).toBeGreaterThanOrEqual(amount1 + amount2)
+			// Volume delta should include both trades
+			const volumeDelta = after.alice.totalVolume - before.alice.totalVolume
+			expect(volumeDelta).toBeGreaterThanOrEqual(amount1 + amount2)
 		})
 	})
 
 	describe('Tier & Cashback System', () => {
 		test('new user starts at Tier 0 (Wood) with 0.05% cashback', async () => {
 			const tier = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getCurrentTier',
 				args: [accounts.alice.address],
 			})
@@ -670,8 +807,8 @@ describe('Fee Math', () => {
 
 			// Verify Tier 0 configuration
 			const tierConfig = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getTier',
 				args: [0],
 			})
@@ -681,22 +818,20 @@ describe('Fee Math', () => {
 		})
 
 		test('user receives cashback on trade based on tier', async () => {
+			const before = await snapshotState()
+
 			// Use smaller amount to ensure user stays at Tier 0
 			const amountIn = parseUnits('1000', 6) // 1k USDC
 			const swapEvent = await executeBuy(accounts.alice, testCurveAddress, amountIn)
 
-			const account = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'getUserReward',
-				args: [accounts.alice.address],
-			})
+			const after = await snapshotState()
 
-			// Verify user received some cashback
-			expect(account.accumulatedCashback).toBeGreaterThan(0n)
+			// Verify user received some cashback (delta)
+			const cashbackDelta = after.alice.accumulatedCashback - before.alice.accumulatedCashback
+			expect(cashbackDelta).toBeGreaterThan(0n)
 
-			// Cashback should be less than the total trading fee
-			expect(account.accumulatedCashback).toBeLessThan(swapEvent.tradingFee)
+			// Cashback delta should be less than the total trading fee
+			expect(cashbackDelta).toBeLessThan(swapEvent.tradingFee)
 
 			// Verify cashback was calculated (value in swap event)
 			expect(swapEvent.cashbackFee).toBeGreaterThan(0n)
@@ -708,8 +843,8 @@ describe('Fee Math', () => {
 			await executeBuy(accounts.alice, testCurveAddress, amountIn)
 
 			const tier = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getCurrentTier',
 				args: [accounts.alice.address],
 			})
@@ -724,8 +859,8 @@ describe('Fee Math', () => {
 
 			// Verify at Tier 1
 			let tier = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getCurrentTier',
 				args: [accounts.alice.address],
 			})
@@ -733,8 +868,8 @@ describe('Fee Math', () => {
 
 			// Get cashback before second trade
 			const accountBefore = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getUserReward',
 				args: [accounts.alice.address],
 			})
@@ -744,8 +879,8 @@ describe('Fee Math', () => {
 			const secondTrade = await executeBuy(accounts.alice, testCurveAddress, amountIn)
 
 			const accountAfter = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getUserReward',
 				args: [accounts.alice.address],
 			})
@@ -758,6 +893,8 @@ describe('Fee Math', () => {
 		})
 
 		test('cashback accumulates across multiple trades', async () => {
+			const before = await snapshotState()
+
 			const amountIn = parseUnits('1000', 6)
 
 			// Make 3 trades
@@ -765,15 +902,11 @@ describe('Fee Math', () => {
 				await executeBuy(accounts.alice, testCurveAddress, amountIn)
 			}
 
-			const account = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'getUserReward',
-				args: [accounts.alice.address],
-			})
+			const after = await snapshotState()
 
-			// Should have accumulated cashback from all 3 trades
-			expect(account.accumulatedCashback).toBeGreaterThan(0n)
+			// Should have accumulated cashback from all 3 trades (delta)
+			const cashbackDelta = after.alice.accumulatedCashback - before.alice.accumulatedCashback
+			expect(cashbackDelta).toBeGreaterThan(0n)
 		})
 
 		test('can claim accumulated cashback', async () => {
@@ -782,8 +915,8 @@ describe('Fee Math', () => {
 
 			// Get expected cashback amount
 			const accountBefore = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getUserReward',
 				args: [accounts.alice.address],
 			})
@@ -800,8 +933,8 @@ describe('Fee Math', () => {
 			// Claim cashback
 			const { request: claimReq } = await client.simulateContract({
 				account: accounts.alice,
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'claimCashback',
 			})
 			const claimHash = await walletClient.writeContract(claimReq)
@@ -819,8 +952,8 @@ describe('Fee Math', () => {
 
 			// Account should be zeroed after claim
 			const accountAfter = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getUserReward',
 				args: [accounts.alice.address],
 			})
@@ -830,23 +963,22 @@ describe('Fee Math', () => {
 
 	describe('Creator Fee', () => {
 		test('creator receives 0.5% fee on every trade', async () => {
+			const before = await snapshotState()
+
 			const amountIn = parseUnits('10000', 6) // 10k USDC
 			await executeBuy(accounts.bob, testCurveAddress, amountIn)
 
-			// Read creator fees from Alice's UserReward (Alice is the creator of testCurve)
-			const aliceReward = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'getUserReward',
-				args: [accounts.alice.address],
-			})
+			const after = await snapshotState()
 
-			// Expected creator fee: 0.5% of amountIn
+			// Expected creator fee delta: 0.5% of amountIn
 			const expectedCreatorFee = (amountIn * BigInt(CREATOR_FEE_BP)) / BigInt(MAX_BP)
-			expect(aliceReward.accumulatedCreatorFee).toBe(expectedCreatorFee)
+			const creatorFeeDelta = after.alice.accumulatedCreatorFee - before.alice.accumulatedCreatorFee
+			expect(creatorFeeDelta).toBe(expectedCreatorFee)
 		})
 
 		test('creator fee accumulates across multiple trades', async () => {
+			const before = await snapshotState()
+
 			const amountIn = parseUnits('1000', 6)
 
 			// Make 3 trades
@@ -854,20 +986,17 @@ describe('Fee Math', () => {
 				await executeBuy(accounts.bob, testCurveAddress, amountIn)
 			}
 
-			// Read creator fees from Alice's UserReward (Alice is the creator)
-			const aliceReward = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'getUserReward',
-				args: [accounts.alice.address],
-			})
+			const after = await snapshotState()
 
-			// Expected total creator fee: 0.5% of (1000 * 3)
+			// Expected total creator fee delta: 0.5% of (1000 * 3)
 			const expectedTotalCreatorFee = (amountIn * 3n * BigInt(CREATOR_FEE_BP)) / BigInt(MAX_BP)
-			expect(aliceReward.accumulatedCreatorFee).toBe(expectedTotalCreatorFee)
+			const creatorFeeDelta = after.alice.accumulatedCreatorFee - before.alice.accumulatedCreatorFee
+			expect(creatorFeeDelta).toBe(expectedTotalCreatorFee)
 		})
 
 		test('different curves accumulate to their respective creators', async () => {
+			const before = await snapshotState()
+
 			// Trade on first curve (creator is Alice)
 			const amount1 = parseUnits('1000', 6)
 			await executeBuy(accounts.bob, testCurveAddress, amount1)
@@ -880,28 +1009,17 @@ describe('Fee Math', () => {
 			const amount2 = parseUnits('2000', 6)
 			await executeBuy(accounts.alice, curve2, amount2)
 
-			// Read creator fees from each creator's UserReward
-			const [aliceReward, bobReward] = await Promise.all([
-				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
-					functionName: 'getUserReward',
-					args: [accounts.alice.address],
-				}),
-				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
-					functionName: 'getUserReward',
-					args: [accounts.bob.address],
-				}),
-			])
+			const after = await snapshotState()
 
-			// Each creator should have their respective fees
+			// Each creator should have their respective fee deltas
 			const expectedFee1 = (amount1 * BigInt(CREATOR_FEE_BP)) / BigInt(MAX_BP)
 			const expectedFee2 = (amount2 * BigInt(CREATOR_FEE_BP)) / BigInt(MAX_BP)
 
-			expect(aliceReward.accumulatedCreatorFee).toBe(expectedFee1)
-			expect(bobReward.accumulatedCreatorFee).toBe(expectedFee2)
+			const aliceCreatorFeeDelta = after.alice.accumulatedCreatorFee - before.alice.accumulatedCreatorFee
+			const bobCreatorFeeDelta = after.bob.accumulatedCreatorFee - before.bob.accumulatedCreatorFee
+
+			expect(aliceCreatorFeeDelta).toBe(expectedFee1)
+			expect(bobCreatorFeeDelta).toBe(expectedFee2)
 		})
 	})
 
@@ -910,32 +1028,23 @@ describe('Fee Math', () => {
 			// Setup referral
 			await setupReferralChain(accounts.bob.address, accounts.alice.address)
 
+			const before = await snapshotState()
+
 			const amountIn = parseUnits('10000', 6)
 			const swapEvent = await executeBuy(accounts.bob, testCurveAddress, amountIn)
+
+			const after = await snapshotState()
 
 			// Should have referee discount (1.4% fee instead of 1.5%)
 			const expectedFee = (amountIn * BigInt(FEE_BP - REFEREE_DISCOUNT_BP)) / BigInt(MAX_BP)
 			expect(swapEvent.tradingFee).toBe(expectedFee)
 
 			// Should also receive cashback (calculated from total fee)
-			const bobAccount = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'getUserReward',
-				args: [accounts.bob.address],
-			})
-
-			// Note: 10k trade pushes Bob to Tier 1, so he gets 0.08% cashback
-			// Cashback is calculated from total fee, not trade amount
-			const tier = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'getCurrentTier',
-				args: [accounts.bob.address],
-			})
-			const tierBP = tier === 0 ? TIER_0_BP : TIER_1_BP
+			// Note: 10k trade might push Bob to Tier 1, so use his actual tier after trade
+			const tierBP = after.bob.currentTier === 0 ? TIER_0_BP : TIER_1_BP
 			const expectedCashback = (swapEvent.tradingFee * BigInt(tierBP)) / BigInt(MAX_BP)
-			expect(bobAccount.accumulatedCashback).toBe(expectedCashback)
+			const cashbackDelta = after.bob.accumulatedCashback - before.bob.accumulatedCashback
+			expect(cashbackDelta).toBe(expectedCashback)
 		})
 
 		test('3-level referral + cashback + discount all work together', async () => {
@@ -947,47 +1056,29 @@ describe('Fee Math', () => {
 				accounts.dave.address,
 			)
 
+			const before = await snapshotState()
+
 			const amountIn = parseUnits('10000', 6)
 			const swapEvent = await executeBuy(accounts.alice, testCurveAddress, amountIn)
+
+			const after = await snapshotState()
 
 			// 1. Verify referee discount (Alice pays 1.4%)
 			const expectedFee = (amountIn * BigInt(FEE_BP - REFEREE_DISCOUNT_BP)) / BigInt(MAX_BP)
 			expect(swapEvent.tradingFee).toBe(expectedFee)
 
-			// 2. Verify Alice gets cashback
-			const aliceAccount = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'getUserReward',
-				args: [accounts.alice.address],
-			})
-			expect(aliceAccount.accumulatedCashback).toBeGreaterThan(0n)
+			// 2. Verify Alice gets cashback (delta)
+			const aliceCashbackDelta = after.alice.accumulatedCashback - before.alice.accumulatedCashback
+			expect(aliceCashbackDelta).toBeGreaterThan(0n)
 
-			// 3. Verify all 3 referrers get rewards
-			const [bobAccount, charlieAccount, daveAccount] = await Promise.all([
-				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
-					functionName: 'getUserReward',
-					args: [accounts.bob.address],
-				}),
-				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
-					functionName: 'getUserReward',
-					args: [accounts.charlie.address],
-				}),
-				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
-					functionName: 'getUserReward',
-					args: [accounts.dave.address],
-				}),
-			])
+			// 3. Verify all 3 referrers get rewards (deltas)
+			const bobReferralDelta = after.bob.accumulatedReferral - before.bob.accumulatedReferral
+			const charlieReferralDelta = after.charlie.accumulatedReferral - before.charlie.accumulatedReferral
+			const daveReferralDelta = after.dave.accumulatedReferral - before.dave.accumulatedReferral
 
-			expect(bobAccount.accumulatedReferral).toBeGreaterThan(0n)
-			expect(charlieAccount.accumulatedReferral).toBeGreaterThan(0n)
-			expect(daveAccount.accumulatedReferral).toBeGreaterThan(0n)
+			expect(bobReferralDelta).toBeGreaterThan(0n)
+			expect(charlieReferralDelta).toBeGreaterThan(0n)
+			expect(daveReferralDelta).toBeGreaterThan(0n)
 		})
 
 		test('can claim cashback, referral, and creator fee rewards together', async () => {
@@ -1002,8 +1093,8 @@ describe('Fee Math', () => {
 
 			// Get Bob's expected total rewards (including creator fee since Bob created no curves in this test)
 			const bobAccountBefore = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getUserReward',
 				args: [accounts.bob.address],
 			})
@@ -1024,8 +1115,8 @@ describe('Fee Math', () => {
 			// Claim all rewards (cashback, referral, creator fee)
 			const { request: claimReq } = await client.simulateContract({
 				account: accounts.bob,
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'claimCreatorFeeCashbackAndReferral',
 			})
 			const claimHash = await walletClient.writeContract(claimReq)
@@ -1043,14 +1134,16 @@ describe('Fee Math', () => {
 		})
 
 		test('tier upgrade applies as volume accumulates', async () => {
+			const before = await snapshotState()
+
 			// Make multiple small trades
 			const tradeAmount = parseUnits('3000', 6)
 
 			// First trade
 			await executeBuy(accounts.alice, testCurveAddress, tradeAmount)
 			let tier = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getCurrentTier',
 				args: [accounts.alice.address],
 			})
@@ -1065,9 +1158,11 @@ describe('Fee Math', () => {
 			// Fourth trade - definitely should be tier 1 now (12k+ volume)
 			await executeBuy(accounts.alice, testCurveAddress, tradeAmount)
 
+			const after = await snapshotState()
+
 			tier = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getCurrentTier',
 				args: [accounts.alice.address],
 			})
@@ -1075,14 +1170,9 @@ describe('Fee Math', () => {
 			// After 12k+ volume, should be at least Tier 1
 			expect(tier).toBeGreaterThanOrEqual(1)
 
-			// Volume should be cumulative
-			const account = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'getUserReward',
-				args: [accounts.alice.address],
-			})
-			expect(account.totalVolume).toBeGreaterThan(parseUnits('10000', 6))
+			// Volume delta should be cumulative (4 trades * 3000)
+			const volumeDelta = after.alice.totalVolume - before.alice.totalVolume
+			expect(volumeDelta).toBeGreaterThan(parseUnits('10000', 6))
 		})
 	})
 
@@ -1099,46 +1189,94 @@ describe('Fee Math', () => {
 		test('first trade ever (new user, Tier 0, no referral)', async () => {
 			// Charlie has never traded
 			const tier = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getCurrentTier',
 				args: [accounts.charlie.address],
 			})
 			expect(tier).toBe(0)
 
+			const before = await snapshotState()
+
 			// Make first trade
 			const amountIn = parseUnits('1000', 6)
 			const swapEvent = await executeBuy(accounts.charlie, testCurveAddress, amountIn)
+
+			const after = await snapshotState()
 
 			// Should pay full 1.5% fee (no referral discount)
 			const expectedFee = (amountIn * BigInt(FEE_BP)) / BigInt(MAX_BP)
 			expect(swapEvent.tradingFee).toBe(expectedFee)
 
-			// Should receive Tier 0 cashback (calculated from total fee, not trade amount)
-			const charlieAccount = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
-				functionName: 'getUserReward',
-				args: [accounts.charlie.address],
-			})
+			// Should receive Tier 0 cashback delta (calculated from total fee, not trade amount)
 			const expectedCashback = (swapEvent.tradingFee * BigInt(TIER_0_BP)) / BigInt(MAX_BP)
-			expect(charlieAccount.accumulatedCashback).toBe(expectedCashback)
+			const charlieCashbackDelta = after.charlie.accumulatedCashback - before.charlie.accumulatedCashback
+			expect(charlieCashbackDelta).toBe(expectedCashback)
 		})
 
 		test('trading exactly at tier boundary', async () => {
-			// Trade exactly 10k USDC to hit Tier 1 threshold
-			const exactThreshold = parseUnits('10000', 6)
-			await executeBuy(accounts.alice, testCurveAddress, exactThreshold)
-
-			const tier = await client.readContract({
-				address: contracts.factory.address,
-				abi: contracts.factory.abi,
+			// Get current volume and tier
+			const accountBefore = await client.readContract({
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
+				functionName: 'getUserReward',
+				args: [accounts.alice.address],
+			})
+			const tierBefore = await client.readContract({
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
 				functionName: 'getCurrentTier',
 				args: [accounts.alice.address],
 			})
 
-			// Should be promoted to Tier 1
-			expect(tier).toBe(1)
+			// Get tier 1 threshold
+			const tier1Config = await client.readContract({
+				address: contracts.reward.address,
+				abi: contracts.reward.abi,
+				functionName: 'getTier',
+				args: [1],
+			})
+
+			// Calculate how much more volume needed to reach tier 1
+			const volumeNeeded = tier1Config.volumeThreshold - accountBefore.totalVolume
+
+			// If already at tier 1 or higher, trade to reach tier 2
+			if (tierBefore >= 1) {
+				const tier2Config = await client.readContract({
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
+					functionName: 'getTier',
+					args: [2],
+				})
+				const volumeForTier2 = tier2Config.volumeThreshold - accountBefore.totalVolume
+
+				if (volumeForTier2 > 0n) {
+					await executeBuy(accounts.alice, testCurveAddress, volumeForTier2)
+
+					const tierAfter = await client.readContract({
+						address: contracts.reward.address,
+						abi: contracts.reward.abi,
+						functionName: 'getCurrentTier',
+						args: [accounts.alice.address],
+					})
+
+					// Should be promoted to Tier 2
+					expect(tierAfter).toBe(2)
+				}
+			} else {
+				// Trade exactly enough to reach tier 1
+				await executeBuy(accounts.alice, testCurveAddress, volumeNeeded)
+
+				const tierAfter = await client.readContract({
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
+					functionName: 'getCurrentTier',
+					args: [accounts.alice.address],
+				})
+
+				// Should be promoted to Tier 1
+				expect(tierAfter).toBe(1)
+			}
 		})
 	})
 
@@ -1156,31 +1294,31 @@ describe('Fee Math', () => {
 			const [protocolFeesBefore, aliceAccountBefore, bobAccountBefore, charlieAccountBefore, daveAccountBefore] =
 				await Promise.all([
 					client.readContract({
-						address: contracts.factory.address,
-						abi: contracts.factory.abi,
+						address: contracts.reward.address,
+						abi: contracts.reward.abi,
 						functionName: 'accumulatedProtocolFees',
 					}),
 					client.readContract({
-						address: contracts.factory.address,
-						abi: contracts.factory.abi,
+						address: contracts.reward.address,
+						abi: contracts.reward.abi,
 						functionName: 'getUserReward',
 						args: [accounts.alice.address],
 					}),
 					client.readContract({
-						address: contracts.factory.address,
-						abi: contracts.factory.abi,
+						address: contracts.reward.address,
+						abi: contracts.reward.abi,
 						functionName: 'getUserReward',
 						args: [accounts.bob.address],
 					}),
 					client.readContract({
-						address: contracts.factory.address,
-						abi: contracts.factory.abi,
+						address: contracts.reward.address,
+						abi: contracts.reward.abi,
 						functionName: 'getUserReward',
 						args: [accounts.charlie.address],
 					}),
 					client.readContract({
-						address: contracts.factory.address,
-						abi: contracts.factory.abi,
+						address: contracts.reward.address,
+						abi: contracts.reward.abi,
 						functionName: 'getUserReward',
 						args: [accounts.dave.address],
 					}),
@@ -1193,31 +1331,31 @@ describe('Fee Math', () => {
 			const [protocolFeesAfter, aliceAccountAfter, bobAccountAfter, charlieAccountAfter, daveAccountAfter] =
 				await Promise.all([
 					client.readContract({
-						address: contracts.factory.address,
-						abi: contracts.factory.abi,
+						address: contracts.reward.address,
+						abi: contracts.reward.abi,
 						functionName: 'accumulatedProtocolFees',
 					}),
 					client.readContract({
-						address: contracts.factory.address,
-						abi: contracts.factory.abi,
+						address: contracts.reward.address,
+						abi: contracts.reward.abi,
 						functionName: 'getUserReward',
 						args: [accounts.alice.address],
 					}),
 					client.readContract({
-						address: contracts.factory.address,
-						abi: contracts.factory.abi,
+						address: contracts.reward.address,
+						abi: contracts.reward.abi,
 						functionName: 'getUserReward',
 						args: [accounts.bob.address],
 					}),
 					client.readContract({
-						address: contracts.factory.address,
-						abi: contracts.factory.abi,
+						address: contracts.reward.address,
+						abi: contracts.reward.abi,
 						functionName: 'getUserReward',
 						args: [accounts.charlie.address],
 					}),
 					client.readContract({
-						address: contracts.factory.address,
-						abi: contracts.factory.abi,
+						address: contracts.reward.address,
+						abi: contracts.reward.abi,
 						functionName: 'getUserReward',
 						args: [accounts.dave.address],
 					}),
@@ -1249,13 +1387,13 @@ describe('Fee Math', () => {
 			// Snapshot fees before trade
 			const [protocolFeesBefore, aliceRewardBefore] = await Promise.all([
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'accumulatedProtocolFees',
 				}),
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'getUserReward',
 					args: [accounts.alice.address], // Alice is the creator
 				}),
@@ -1267,13 +1405,13 @@ describe('Fee Math', () => {
 			// Read fees from factory after trade
 			const [protocolFeesAfter, aliceRewardAfter] = await Promise.all([
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'accumulatedProtocolFees',
 				}),
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'getUserReward',
 					args: [accounts.alice.address],
 				}),
@@ -1296,13 +1434,13 @@ describe('Fee Math', () => {
 			// Read fees from factory
 			const [protocolFees, account] = await Promise.all([
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'accumulatedProtocolFees',
 				}),
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'getUserReward',
 					args: [accounts.alice.address],
 				}),

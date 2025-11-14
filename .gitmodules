@@ -10,3 +10,15 @@
 [submodule "eth-amm/lib/v3-core"]
 	path = eth-amm/lib/v3-core
 	url = https://github.com/Uniswap/v3-core
+[submodule "eth-amm/lib/v3-periphery"]
+	path = eth-amm/lib/v3-periphery
+	url = https://github.com/Uniswap/v3-periphery
+[submodule "eth-amm/lib-0_7_6/openzeppelin-contracts"]
+	path = eth-amm/lib-0_7_6/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts.git
+[submodule "eth-amm/lib-0_7_6/v3-core"]
+	path = eth-amm/lib-0_7_6/v3-core
+	url = https://github.com/Uniswap/v3-core.git
+[submodule "eth-amm/lib-0_7_6/v3-periphery"]
+	path = eth-amm/lib-0_7_6/v3-periphery
+	url = https://github.com/Uniswap/v3-periphery.git

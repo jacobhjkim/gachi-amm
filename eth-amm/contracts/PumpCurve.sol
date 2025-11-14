@@ -5,15 +5,21 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IPumpFactory} from "./interfaces/IPumpFactory.sol";
+import {IPumpReward} from "./interfaces/IPumpReward.sol";
 import {IPumpCurve} from "./interfaces/IPumpCurve.sol";
 import {PumpToken} from "./PumpToken.sol";
+import {IUniswapV3Factory} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
+import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import {IUniswapV3MintCallback} from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3MintCallback.sol";
+import {TickMath} from "./libraries/TickMath.sol";
+import {LiquidityAmounts} from "./libraries/LiquidityAmounts.sol";
 
 /**
  * @title PumpCurve
  * @notice Bonding curve contract for trading tokens with virtual AMM reserves
  * @dev Each curve is deployed per token and manages the bonding curve trading logic
  */
-contract PumpCurve is IPumpCurve, ReentrancyGuard {
+contract PumpCurve is IPumpCurve, IUniswapV3MintCallback, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // ============ Constants ============
@@ -23,6 +29,19 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
 
     /// @notice Graduation threshold magic number for capping logic
     uint256 private constant GRADUATION_THRESHOLD = 17_250_803_836;
+
+    /// @notice Migration fee percentage (5% in basis points)
+    uint256 private constant MIGRATION_FEE_BASIS_POINTS = 500;
+
+    /// @notice Uniswap v3 pool fee tier (1%)
+    uint24 private constant UNISWAP_POOL_FEE = 10000;
+
+    /// @notice Full range tick bounds for Uniswap v3
+    /// @dev For 1% fee tier, tick spacing is 200, so ticks must be multiples of 200
+    /// @dev TickMath.MIN_TICK and TickMath.MAX_TICK are -887272 and 887272
+    /// @dev We use -887200 and 887200 (multiples of 200) for full range
+    int24 private constant FULL_RANGE_MIN_TICK = -887200;
+    int24 private constant FULL_RANGE_MAX_TICK = -FULL_RANGE_MIN_TICK;
 
     // ============ Immutable Storage ============
 
@@ -38,10 +57,22 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
     /// @inheritdoc IPumpCurve
     address public immutable override creator;
 
+    /// @notice Uniswap v3 factory address for creating pools
+    address public immutable uniswapV3Factory;
+
+    /// @notice Reward contract address for fee calculations and distribution
+    address public immutable rewardContract;
+
     // ============ Mutable Storage ============
 
     /// @inheritdoc IPumpCurve
     bool public override graduated;
+
+    /// @notice Whether liquidity has been migrated to Uniswap v3
+    bool public migrated;
+
+    /// @notice Address of the created Uniswap v3 pool
+    address public poolAddress;
 
     /// @dev Internal storage for curve state
     CurveState internal _state;
@@ -53,11 +84,19 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
 
     // ============ Constructor ============
 
-    constructor(address _baseToken, address _quoteToken, address _creator) {
+    constructor(
+        address _baseToken,
+        address _quoteToken,
+        address _creator,
+        address _uniswapV3Factory,
+        address _rewardContract
+    ) {
         factory = msg.sender;
         baseToken = _baseToken;
         quoteToken = _quoteToken;
         creator = _creator;
+        uniswapV3Factory = _uniswapV3Factory;
+        rewardContract = _rewardContract;
 
         // Initialize state with default values
         // Virtual reserves can be set by factory after deployment
@@ -95,7 +134,7 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
         if (quoteToBase) {
             // Buying base tokens with quote tokens
             // Fees are deducted from INPUT quote before swap calculation
-            // Get fees from factory (factory has all the logic)
+            // Get fees from reward contract (reward contract has all the logic)
             (
                 fees.totalFee,
                 fees.protocolFee,
@@ -104,7 +143,7 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
                 fees.l1ReferralFee,
                 fees.l2ReferralFee,
                 fees.l3ReferralFee
-            ) = IPumpFactory(factory).calculateFees(msg.sender, amountIn);
+            ) = IPumpReward(rewardContract).calculateFees(msg.sender, amountIn);
 
             actualAmountIn = amountIn - fees.totalFee;
 
@@ -126,7 +165,7 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
 
                 // Recalculate fees on the capped input (add fees back to get total user pays)
                 // Get fee config to calculate total amount needed
-                IPumpFactory.FeeConfig memory feeConfig = IPumpFactory(factory).feeConfig();
+                IPumpReward.FeeConfig memory feeConfig = IPumpReward(rewardContract).feeConfig();
                 uint256 effectiveFeeRate = fees.l1ReferralFee > 0 || fees.l2ReferralFee > 0 || fees.l3ReferralFee > 0
                     ? feeConfig.feeBasisPoints - feeConfig.refereeDiscountBasisPoints
                     : feeConfig.feeBasisPoints;
@@ -136,7 +175,7 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
                     cappedActualAmountIn, MAX_BASIS_POINTS, MAX_BASIS_POINTS - effectiveFeeRate, Math.Rounding.Ceil
                 );
 
-                // Recalculate fees from factory
+                // Recalculate fees from reward contract
                 (
                     fees.totalFee,
                     fees.protocolFee,
@@ -145,7 +184,7 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
                     fees.l1ReferralFee,
                     fees.l2ReferralFee,
                     fees.l3ReferralFee
-                ) = IPumpFactory(factory).calculateFees(msg.sender, cappedTotalAmountIn);
+                ) = IPumpReward(rewardContract).calculateFees(msg.sender, cappedTotalAmountIn);
 
                 // Update amounts to use capped values
                 amountIn = cappedTotalAmountIn;
@@ -170,7 +209,7 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
             amountOut = _getSwapAmountFromBaseToQuote(cache.virtualQuoteReserve, cache.virtualBaseReserve, amountIn);
 
             // Fees are deducted from OUTPUT quote after swap calculation
-            // Get fees from factory (factory has all the logic)
+            // Get fees from reward contract (reward contract has all the logic)
             (
                 fees.totalFee,
                 fees.protocolFee,
@@ -179,7 +218,7 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
                 fees.l1ReferralFee,
                 fees.l2ReferralFee,
                 fees.l3ReferralFee
-            ) = IPumpFactory(factory).calculateFees(msg.sender, amountOut);
+            ) = IPumpReward(rewardContract).calculateFees(msg.sender, amountOut);
 
             amountOut -= fees.totalFee;
 
@@ -216,16 +255,16 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
             IERC20(quoteToken).safeTransfer(recipient, amountOut);
         }
 
-        // 7. Transfer all fees to factory for distribution
+        // 7. Transfer all fees to reward contract for distribution
         // Note: fees are always in quote tokens
         if (fees.totalFee > 0) {
-            IERC20(quoteToken).safeTransfer(factory, fees.totalFee);
+            IERC20(quoteToken).safeTransfer(rewardContract, fees.totalFee);
         }
 
-        // 8. Track all fees in factory (single call for gas efficiency)
+        // 8. Track all fees in reward contract (single call for gas efficiency)
         // Volume should always be tracked in quote tokens
         uint256 quoteVolume = quoteToBase ? amountIn : (amountOut + fees.totalFee);
-        IPumpFactory(factory).addFees(
+        IPumpReward(rewardContract).addFees(
             msg.sender,
             creator,
             quoteVolume,
@@ -322,5 +361,134 @@ contract PumpCurve is IPumpCurve, ReentrancyGuard {
         quoteOut = virtualQuote - newVirtualQuote;
 
         return quoteOut;
+    }
+
+    // ============ Migration Functions ============
+
+    /// @notice Migrate liquidity to Uniswap v3 after graduation
+    /// @dev Can be called by anyone after graduation. Creates a Uniswap v3 pool and adds full-range liquidity
+    function migrate() external nonReentrant {
+        // 1. Validation
+        require(graduated, "Curve must be graduated");
+        require(!migrated, "Already migrated");
+
+        // 2. Get actual token balances
+        uint256 quoteBalance = IERC20(quoteToken).balanceOf(address(this));
+        uint256 baseBalance = IERC20(baseToken).balanceOf(address(this));
+
+        require(quoteBalance > 0 && baseBalance > 0, "Insufficient balances");
+
+        // 3. Take 5% migration fee from quote tokens
+        uint256 migrationFee = Math.mulDiv(quoteBalance, MIGRATION_FEE_BASIS_POINTS, MAX_BASIS_POINTS);
+        uint256 quoteForLiquidity = quoteBalance - migrationFee;
+
+        // Transfer fee to reward contract
+        IERC20(quoteToken).safeTransfer(rewardContract, migrationFee);
+        IPumpReward(rewardContract).addProtocolFee(migrationFee);
+
+        // 4. Determine token0 and token1 (Uniswap v3 requires sorted order)
+        (address token0, address token1) = baseToken < quoteToken ? (baseToken, quoteToken) : (quoteToken, baseToken);
+        (uint256 amount0, uint256 amount1) =
+            baseToken < quoteToken ? (baseBalance, quoteForLiquidity) : (quoteForLiquidity, baseBalance);
+
+        // 5. Create Uniswap v3 pool
+        address pool = IUniswapV3Factory(uniswapV3Factory).createPool(token0, token1, UNISWAP_POOL_FEE);
+        poolAddress = pool;
+
+        // 6. Calculate initial price (sqrtPriceX96)
+        // Price = quoteReserve / baseReserve (in quote per base)
+        // sqrtPriceX96 = sqrt(price) * 2^96
+        // For token0/token1: if token0 = base, price = quote/base, sqrtPriceX96 = sqrt(quote/base) * 2^96
+        // If token0 = quote, price = base/quote, sqrtPriceX96 = sqrt(base/quote) * 2^96
+        uint160 sqrtPriceX96;
+        if (token0 == baseToken) {
+            // token0 = base, token1 = quote
+            // Price (token1/token0) = quote/base
+            // _calculateSqrtPriceX96(amount0, amount1) returns sqrt(amount1/amount0)
+            // So pass (base, quote) to get sqrt(quote/base)
+            sqrtPriceX96 = _calculateSqrtPriceX96(baseBalance, quoteForLiquidity);
+        } else {
+            // token0 = quote, token1 = base
+            // Price (token1/token0) = base/quote
+            // So pass (quote, base) to get sqrt(base/quote)
+            sqrtPriceX96 = _calculateSqrtPriceX96(quoteForLiquidity, baseBalance);
+        }
+
+        // 7. Initialize pool with calculated price
+        IUniswapV3Pool(pool).initialize(sqrtPriceX96);
+
+        // 8. Add full-range liquidity
+        // Calculate liquidity using Uniswap's formula
+        uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
+            sqrtPriceX96,
+            TickMath.getSqrtRatioAtTick(FULL_RANGE_MIN_TICK),
+            TickMath.getSqrtRatioAtTick(FULL_RANGE_MAX_TICK),
+            amount0,
+            amount1
+        );
+
+        // Mint position to address(0) to burn it
+        IUniswapV3Pool(pool).mint(
+            address(0), // recipient - burn the position
+            FULL_RANGE_MIN_TICK, // tickLower - full range
+            FULL_RANGE_MAX_TICK, // tickUpper - full range
+            liquidity, // liquidity amount
+            "" // data - not needed
+        );
+
+        // 9. Mark as migrated
+        migrated = true;
+
+        // 10. Emit event
+        emit Migrated(pool, baseBalance, quoteForLiquidity, migrationFee);
+    }
+
+    /// @inheritdoc IUniswapV3MintCallback
+    /// @dev Called by Uniswap v3 pool during mint to transfer tokens
+    function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes calldata) external override {
+        // Verify caller is the pool we created
+        require(msg.sender == poolAddress, "Invalid callback caller");
+
+        // Transfer tokens to pool
+        if (amount0Owed > 0) {
+            (address token0,) = baseToken < quoteToken ? (baseToken, quoteToken) : (quoteToken, baseToken);
+            IERC20(token0).safeTransfer(msg.sender, amount0Owed);
+        }
+        if (amount1Owed > 0) {
+            (, address token1) = baseToken < quoteToken ? (baseToken, quoteToken) : (quoteToken, baseToken);
+            IERC20(token1).safeTransfer(msg.sender, amount1Owed);
+        }
+    }
+
+    /// @notice Calculate sqrtPriceX96 from token amounts
+    /// @dev sqrtPriceX96 = sqrt(amount1 / amount0) * 2^96
+    /// @param amount0 Amount of token0
+    /// @param amount1 Amount of token1
+    /// @return sqrtPriceX96 The sqrt price in Q64.96 format
+    function _calculateSqrtPriceX96(uint256 amount0, uint256 amount1) internal pure returns (uint160) {
+        // Calculate price ratio: amount1 / amount0
+        // sqrtPrice = sqrt(amount1 / amount0) = sqrt(amount1) / sqrt(amount0)
+        // sqrtPriceX96 = sqrtPrice * 2^96
+
+        // Use Math.mulDiv for safe calculations
+        // sqrtPriceX96 = sqrt(amount1) * 2^96 / sqrt(amount0)
+        // To avoid precision loss, we calculate: sqrt(amount1 * 2^192 / amount0)
+
+        uint256 ratioX192 = Math.mulDiv(amount1, 1 << 192, amount0);
+        return uint160(_sqrt(ratioX192));
+    }
+
+    /// @notice Calculate square root using Babylonian method
+    /// @param x The value to calculate square root of
+    /// @return y The square root of x
+    function _sqrt(uint256 x) internal pure returns (uint256 y) {
+        if (x == 0) return 0;
+
+        uint256 z = (x + 1) / 2;
+        y = x;
+        while (z < y) {
+            y = z;
+            z = (x / z + z) / 2;
+        }
     }
 }

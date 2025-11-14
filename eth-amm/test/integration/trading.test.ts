@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, beforeEach } from 'bun:test'
+import { describe, test, expect, beforeAll, afterEach } from 'bun:test'
 import { type Address, type Hex, parseUnits, formatUnits, parseEventLogs } from 'viem'
 import { createTestPublicClient, createTestWalletClient, checkAnvilConnection } from './libs/setup.ts'
 import { type DeployedContracts, loadDeployedContracts } from './libs/contracts.ts'
@@ -17,7 +17,6 @@ describe('Trading', () => {
 	let walletClient: ReturnType<typeof createTestWalletClient>
 	let contracts: DeployedContracts
 	let accounts: ReturnType<typeof getAllAccounts>
-	let snapshotId: Hex
 
 	// Token and curve addresses for tests
 	let testTokenAddress: Address
@@ -78,15 +77,6 @@ describe('Trading', () => {
 			})
 			await walletClient.writeContract(approveRequest)
 		}
-
-		snapshotId = await client.snapshot()
-	})
-
-	beforeEach(async () => {
-		// Revert to snapshot before each test to ensure clean state
-		await client.revert({ id: snapshotId })
-		// Take a new snapshot for the next test
-		snapshotId = await client.snapshot()
 	})
 
 	describe('Buying Tokens (Quote → Base)', () => {
@@ -101,8 +91,8 @@ describe('Trading', () => {
 					functionName: 'state',
 				}),
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'feeConfig',
 				}),
 			])
@@ -320,10 +310,6 @@ describe('Trading', () => {
 			})
 
 			const expectedOutput = logs[0]!.args.amountOut
-
-			// Revert to try again with higher minAmountOut
-			await client.revert({ id: snapshotId })
-			snapshotId = await client.snapshot()
 
 			// Now try with minAmountOut higher than actual output - should fail
 			const unrealisticMinOut = expectedOutput * 2n
@@ -549,13 +535,13 @@ describe('Trading', () => {
 
 			const [protocolFeesBefore, aliceRewardBefore, { request }] = await Promise.all([
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'accumulatedProtocolFees',
 				}),
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'getUserReward',
 					args: [accounts.alice.address], // Alice is the creator
 				}),
@@ -581,13 +567,13 @@ describe('Trading', () => {
 
 			const [protocolFeesAfter, aliceRewardAfter] = await Promise.all([
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'accumulatedProtocolFees',
 				}),
 				client.readContract({
-					address: contracts.factory.address,
-					abi: contracts.factory.abi,
+					address: contracts.reward.address,
+					abi: contracts.reward.abi,
 					functionName: 'getUserReward',
 					args: [accounts.alice.address],
 				}),
@@ -822,6 +808,6 @@ describe('Trading', () => {
 			expect(totalDriftPercent).toBeLessThan(10n) // Less than 0.1%
 
 			console.log('\n✅ Precision stress test passed!\n')
-		}, 120000) // 2 minute timeout for 500 swaps
+		}, 120_000) // 2 minute timeout for 500 swaps
 	})
 })

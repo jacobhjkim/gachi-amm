@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
-const CONTRACTS = ['PumpCurve', 'PumpFactory', 'PumpToken'] as const
+const CONTRACTS = ['PumpCurve', 'PumpFactory', 'PumpReward', 'PumpToken'] as const
 
 const MOCK_CONTRACTS = ['MockUSDC'] as const
 

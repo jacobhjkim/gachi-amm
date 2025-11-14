@@ -76,6 +76,13 @@ interface IPumpCurve {
     /// @param quoteReserve The final quote token reserve
     event CurveGraduated(uint256 timestamp, uint256 baseReserve, uint256 quoteReserve);
 
+    /// @notice Emitted when liquidity is migrated to Uniswap v3
+    /// @param pool The address of the created Uniswap v3 pool
+    /// @param baseAmount The amount of base tokens migrated
+    /// @param quoteAmount The amount of quote tokens migrated (after fee)
+    /// @param migrationFee The migration fee taken (5% of quote tokens)
+    event Migrated(address indexed pool, uint256 baseAmount, uint256 quoteAmount, uint256 migrationFee);
+
     // ============ View Functions ============
 
     /// @notice Returns the factory that deployed this curve
