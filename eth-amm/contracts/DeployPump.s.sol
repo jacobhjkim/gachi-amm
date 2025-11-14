@@ -51,36 +51,8 @@ contract Deploy is Script {
 
         // Deploy PumpReward (must be deployed before PumpFactory)
         console2.log("\n[2/3] Deploying PumpReward...");
-        // Note: We need to deploy factory first to pass to PumpReward, but PumpReward needs factory address
-        // So we use a placeholder and set it after. But since PumpReward takes factory in constructor,
-        // we need to deploy factory placeholder first, then PumpReward, then actual factory
-        // Actually, looking at PumpReward constructor, it takes factory address
-        // We'll need to deploy a temporary factory or change the approach
 
-        // Better approach: Deploy PumpFactory with address(0) for reward, then deploy PumpReward,
-        // but our PumpFactory is immutable. So we need to:
-        // 1. Create a placeholder address for factory to pass to PumpReward
-        // 2. Then create the actual factory
-
-        // Actually simplest: PumpReward just needs factory to verify curves
-        // We can deploy factory first with a temp reward, then deploy reward with factory, then redeploy factory
-        // OR: Deploy them together by computing addresses first
-
-        // Simplest approach: Deploy PumpFactory with placeholder, deploy PumpReward with factory, update factory reference
-        // But factory is immutable, so we need to:
-        // 1. Calculate what the factory address will be
-        // 2. Deploy PumpReward with that address
-        // 3. Deploy PumpFactory with the reward address
-
-        // Using CREATE2 or simpler: just deploy in order since PumpReward verification can happen later
-        // Actually PumpReward.addFees() verifies caller via factory.getCurve(), so factory needs to exist first
-
-        // Final approach: Deploy temporary factory, deploy reward, then deploy real factory
-        // But that wastes gas. Better: compute addresses in advance
-
-        // For simplicity in script, let's just deploy factory with address(this) as temp reward,
-        // No wait, the factory constructor requires reward != address(0)
-
+        // Note: Because of circular dependency, we use a predicted address for the factory
         // Cleanest: Use vm.computeCreateAddress to predict addresses
         uint256 currentNonce = vm.getNonce(deployer);
         address predictedFactory = vm.computeCreateAddress(deployer, currentNonce + 1);

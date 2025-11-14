@@ -137,7 +137,7 @@ describe('Migration Tests', () => {
 
 	describe('Pre-Migration Validations', () => {
 		test('cannot migrate before graduation', async () => {
-			await expect(
+			expect(
 				client.simulateContract({
 					account: accounts.alice,
 					address: testCurveAddress,
