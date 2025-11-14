@@ -1,10 +1,10 @@
-import { describe, test, expect, beforeAll, afterEach } from 'bun:test'
+import { describe, test, expect, beforeAll } from 'bun:test'
 import { type Address, type Hex, parseUnits, formatUnits, parseEventLogs } from 'viem'
 import { createTestPublicClient, createTestWalletClient, checkAnvilConnection } from './libs/setup.ts'
 import { type DeployedContracts, loadDeployedContracts } from './libs/contracts.ts'
 import { getAllAccounts } from './libs/accounts.ts'
 import { randomBytes } from 'crypto'
-import { calculateSwapOutput, calculatePriceImpact } from './libs/swap.ts'
+import { calculateSwapOutput } from './libs/swap.ts'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address
 const MAX_UINT256 = 2n ** 256n - 1n // Max uint256 value
@@ -50,10 +50,6 @@ describe('Trading', () => {
 
 		const createHash = await walletClient.writeContract(createRequest)
 		await client.waitForTransactionReceipt({ hash: createHash })
-
-		console.log(`\n📋 Test Setup:`)
-		console.log(`  Test token: ${testTokenAddress}`)
-		console.log(`  Test curve: ${testCurveAddress}`)
 
 		// Mint USDC to Alice and Bob for trading
 		const mintAmount = parseUnits('10000', 6) // 10k USDC each
@@ -131,14 +127,6 @@ describe('Trading', () => {
 			const actualOutput = logs[0]!.args.amountOut
 			const actualFee = logs[0]!.args.tradingFee
 
-			console.log('\n🔮 Swap Prediction Test:')
-			console.log(`  Amount in: ${formatUnits(amountIn, 6)} USDC`)
-			console.log(`  Estimated fee: ${formatUnits(totalFee, 6)} USDC`)
-			console.log(`  Actual fee: ${formatUnits(actualFee, 6)} USDC`)
-			console.log(`  Actual amount in (after fee): ${formatUnits(amountIn - actualFee, 6)} USDC`)
-			console.log(`  Predicted output: ${formatUnits(predictedOutput, 6)} tokens`)
-			console.log(`  Actual output: ${formatUnits(actualOutput, 6)} tokens`)
-
 			// Recalculate with actual fee for exact match
 			const exactPrediction = calculateSwapOutput(
 				state.virtualQuoteReserve,
@@ -146,8 +134,6 @@ describe('Trading', () => {
 				amountIn - actualFee,
 				true,
 			)
-
-			console.log(`  Exact prediction (with actual fee): ${formatUnits(exactPrediction, 6)} tokens`)
 
 			// Exact prediction should match
 			expect(exactPrediction).toBe(actualOutput)
@@ -250,17 +236,6 @@ describe('Trading', () => {
 				functionName: 'state',
 			})
 
-			console.log(`\n📊 Reserve Changes:`)
-			console.log(
-				`  Virtual Quote: ${formatUnits(stateBefore.virtualQuoteReserve, 6)} → ${formatUnits(stateAfter.virtualQuoteReserve, 6)} USDC`,
-			)
-			console.log(
-				`  Virtual Base: ${formatUnits(stateBefore.virtualBaseReserve, 6)} → ${formatUnits(stateAfter.virtualBaseReserve, 6)} tokens`,
-			)
-			console.log(
-				`  Base Reserve: ${formatUnits(stateBefore.baseReserve, 6)} → ${formatUnits(stateAfter.baseReserve, 6)} tokens`,
-			)
-
 			// Virtual quote reserve should increase by actualAmountIn (after fees)
 			// Fee is deducted from input before swap, so reserves only see the net amount
 			const actualAmountIn = amountIn - swapEvent.tradingFee
@@ -279,10 +254,6 @@ describe('Trading', () => {
 			// Allow for small rounding errors
 			const diff = kAfter > kBefore ? kAfter - kBefore : kBefore - kAfter
 			const diffPercent = (diff * 10000n) / kBefore
-
-			console.log(`  k before: ${kBefore}`)
-			console.log(`  k after:  ${kAfter}`)
-			console.log(`  diff:     ${diffPercent / 100n}.${diffPercent % 100n}%`)
 
 			// With Math.mulDiv, we expect much better precision: < 0.01% (1 basis point)
 			expect(diffPercent).toBeLessThan(1n) // Less than 0.01% difference
@@ -352,12 +323,6 @@ describe('Trading', () => {
 				outputs.push(logs[0]!.args.amountOut)
 			}
 
-			console.log(`\n📈 Price Increase Test:`)
-			for (let i = 0; i < trades; i++) {
-				const price = (amountPerTrade * parseUnits('1', 6)) / outputs[i]!
-				console.log(`  Trade ${i + 1}: ${formatUnits(outputs[i]!, 6)} tokens → ${formatUnits(price, 6)} USDC per token`)
-			}
-
 			// Each subsequent trade should get fewer tokens (price increasing)
 			expect(outputs[1]!).toBeLessThan(outputs[0]!)
 			expect(outputs[2]!).toBeLessThan(outputs[1]!)
@@ -423,11 +388,6 @@ describe('Trading', () => {
 			})
 
 			const sellEvent = sellLogs[0]!.args
-
-			console.log(`\n💸 Sell Trade:`)
-			console.log(`  Input: ${formatUnits(sellEvent.amountIn, 6)} tokens`)
-			console.log(`  Output: ${formatUnits(sellEvent.amountOut, 6)} USDC`)
-			console.log(`  Fee: ${formatUnits(sellEvent.tradingFee, 6)} USDC`)
 
 			expect(sellEvent.quoteToBase).toBe(false)
 			expect(sellEvent.amountIn).toBe(tokensBought)
@@ -507,17 +467,6 @@ describe('Trading', () => {
 				functionName: 'state',
 			})
 
-			console.log(`\n📊 Reserve Changes (Sell):`)
-			console.log(
-				`  Virtual Quote: ${formatUnits(stateBefore.virtualQuoteReserve, 6)} → ${formatUnits(stateAfter.virtualQuoteReserve, 6)} USDC`,
-			)
-			console.log(
-				`  Virtual Base: ${formatUnits(stateBefore.virtualBaseReserve, 6)} → ${formatUnits(stateAfter.virtualBaseReserve, 6)} tokens`,
-			)
-			console.log(
-				`  Base Reserve: ${formatUnits(stateBefore.baseReserve, 6)} → ${formatUnits(stateAfter.baseReserve, 6)} tokens`,
-			)
-
 			// Virtual base reserve should increase
 			expect(stateAfter.virtualBaseReserve).toBeGreaterThan(stateBefore.virtualBaseReserve)
 
@@ -582,10 +531,6 @@ describe('Trading', () => {
 			const creatorFeesBefore = aliceRewardBefore.accumulatedCreatorFee
 			const creatorFeesAfter = aliceRewardAfter.accumulatedCreatorFee
 
-			console.log(`\n💰 Fee Accumulation:`)
-			console.log(`  Protocol fee: ${formatUnits(swapEvent.protocolFee, 6)} tokens`)
-			console.log(`  Creator fee: ${formatUnits(swapEvent.creatorFee, 6)} tokens`)
-
 			// Fees should be accumulated
 			expect(protocolFeesAfter).toBe(protocolFeesBefore + swapEvent.protocolFee)
 			expect(creatorFeesAfter).toBe(creatorFeesBefore + swapEvent.creatorFee)
@@ -622,8 +567,6 @@ describe('Trading', () => {
 
 	describe('Precision Stress Test', () => {
 		test('k invariant holds after 5000+ swaps', async () => {
-			console.log('\n🔬 Starting precision stress test...\n')
-
 			// Get initial state
 			const initialState = await client.readContract({
 				address: testCurveAddress,

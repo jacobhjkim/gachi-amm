@@ -193,9 +193,8 @@ contract PumpCurve is IPumpCurve, IUniswapV3MintCallback, ReentrancyGuard {
                 newVirtualQuoteReserve = GRADUATION_THRESHOLD;
                 newVirtualBaseReserve = newVirtualBase;
 
-                // Mark as graduated and notify token
+                // Mark curve as graduated (token transfers remain locked until migration)
                 graduated = true;
-                PumpToken(baseToken).graduate();
             } else {
                 // Normal trade: calculate new virtual reserves
                 newVirtualQuoteReserve = cache.virtualQuoteReserve + actualAmountIn;
@@ -428,6 +427,7 @@ contract PumpCurve is IPumpCurve, IUniswapV3MintCallback, ReentrancyGuard {
         );
 
         // Mint position to address(0) to burn it
+        // NOTE: This calls uniswapV3MintCallback which will enable token transfers
         IUniswapV3Pool(pool).mint(
             address(0), // recipient - burn the position
             FULL_RANGE_MIN_TICK, // tickLower - full range
@@ -458,6 +458,10 @@ contract PumpCurve is IPumpCurve, IUniswapV3MintCallback, ReentrancyGuard {
             (, address token1) = baseToken < quoteToken ? (baseToken, quoteToken) : (quoteToken, baseToken);
             IERC20(token1).safeTransfer(msg.sender, amount1Owed);
         }
+
+        // Enable token transfers atomically with liquidity addition
+        // This prevents malicious pool creation between graduation and migration
+        PumpToken(baseToken).graduate();
     }
 
     /// @notice Calculate sqrtPriceX96 from token amounts

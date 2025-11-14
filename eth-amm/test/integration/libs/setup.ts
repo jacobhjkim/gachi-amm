@@ -3,15 +3,7 @@
  * Creates viem clients that connect to local anvil node
  */
 
-import {
-	createWalletClient,
-	http,
-	type TestClient,
-	type WalletClient,
-	type Chain,
-	createTestClient,
-	publicActions,
-} from 'viem'
+import { createWalletClient, http, type Chain, createTestClient, publicActions } from 'viem'
 import { foundry } from 'viem/chains'
 import { ANVIL_RPC_URL } from './constants'
 
@@ -44,7 +36,7 @@ export function createTestPublicClient() {
 /**
  * Create a wallet client for sending transactions
  */
-export function createTestWalletClient(): WalletClient {
+export function createTestWalletClient() {
 	return createWalletClient({
 		chain: anvilChain,
 		transport: http(ANVIL_RPC_URL),
@@ -54,7 +46,7 @@ export function createTestWalletClient(): WalletClient {
 /**
  * Check if anvil is running and accessible
  */
-export async function checkAnvilConnection(): Promise<boolean> {
+export async function checkAnvilConnection() {
 	try {
 		const client = createTestPublicClient()
 		const blockNumber = await client.getBlockNumber()
